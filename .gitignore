@@ -25,3 +25,5 @@ results/
 venv/
 ENV/
 .DS_Store
+*.pyc
+.pytest_cache/
