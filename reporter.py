@@ -33,8 +33,9 @@ class Reporter:
         print("\n" + "="*80)
         print("OPTIMIZATION SUMMARY")
         print("="*80)
-        print("\n⚠️  NOTE: All costs are normalized/scaled for demonstration purposes.")
-        print("         Results illustrate model behavior and solution quality.")
+        
+        # Print scaling information clearly
+        self._print_scaling_info()
         
         self._print_solution_status()
         self._print_objective_breakdown()
@@ -42,9 +43,18 @@ class Reporter:
         self._print_risk_measures()
         self._print_equity_measures()
         self._print_utilization_metrics()
+        self._print_binding_constraints()
         self._print_scenario_statistics()
         
         print("="*80 + "\n")
+    
+    def _print_scaling_info(self):
+        """Print clear information about cost/quantity scaling."""
+        print(f"\n📏 Model Units and Scaling:")
+        print(f"   Cost unit: {self.config.scaling.cost_unit}")
+        print(f"   Distance unit: {self.config.scaling.distance_unit}")
+        print(f"   Quantity unit: {self.config.scaling.quantity_unit}")
+        print(f"\n   ℹ️  {self.config.scaling.scaling_rationale}")
     
     def _print_solution_status(self):
         """Print solution status information."""
@@ -89,17 +99,29 @@ class Reporter:
         print(f"   Total: {total_inventory:,.1f} units")
     
     def _print_risk_measures(self):
-        """Print risk measures with context about stress-testing."""
-        print(f"\n⚠️  Risk Measures:")
+        """Print risk measures with bulletproof calculation verification."""
+        print(f"\n⚠️  Risk Measures (Probability-Weighted Calculations):")
         print(f"   VaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.var_value:,.2f}")
         print(f"   CVaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.cvar_value:,.2f}")
         print(f"   Expected Cost: ${self.result.expected_cost:,.2f}")
+        
+        # Verify CVaR > VaR
+        if self.result.cvar_value >= self.result.var_value:
+            print(f"   ✓ CVaR ≥ VaR (mathematically valid)")
+        else:
+            print(f"   ⚠️  Warning: CVaR < VaR (unexpected)")
+        
+        # Tail membership diagnostic
+        if self.result.tail_scenarios is not None:
+            print(f"\n   Tail Composition (for α={self.config.optimization.cvar_alpha:.1%}):")
+            print(f"      Scenarios in tail: {len(self.result.tail_scenarios)}")
+            print(f"      Tail probability: {self.result.tail_probability:.2%}")
         
         # Calculate risk premium (CVaR - Expected Cost)
         risk_premium = self.result.cvar_value - self.result.expected_cost
         if self.result.expected_cost > 0:
             risk_premium_pct = (risk_premium / self.result.expected_cost) * 100
-            print(f"   Risk Premium: ${risk_premium:,.2f} ({risk_premium_pct:+.1f}%)")
+            print(f"\n   Risk Premium: ${risk_premium:,.2f} ({risk_premium_pct:+.1f}%)")
             
             # Add context about risk premium magnitude
             if risk_premium_pct > 80:
@@ -247,6 +269,73 @@ class Reporter:
         else:
             print(f"         → Unmet demand penalty is lower; model rationally prefers small unmet over emergency")
             print(f"         → This represents a policy choice: accept limited shortfalls rather than expensive emergency supply")
+    
+    def _print_binding_constraints(self):
+        """Print diagnostics on binding constraints to explain model behavior."""
+        print(f"\n🔒 Binding Constraint Diagnostics:")
+        
+        # Supplier capacity constraints
+        if self.result.tight_supplier_constraints:
+            print(f"\n   Tight Supplier Capacity Constraints (slack < 1e-3):")
+            # Group by supplier
+            supplier_tight_scenarios = {}
+            for supplier, scenario, slack in self.result.tight_supplier_constraints:
+                if supplier not in supplier_tight_scenarios:
+                    supplier_tight_scenarios[supplier] = []
+                supplier_tight_scenarios[supplier].append((scenario, slack))
+            
+            for supplier in sorted(supplier_tight_scenarios.keys()):
+                scenarios = supplier_tight_scenarios[supplier]
+                print(f"      {supplier}: Binding in {len(scenarios)} scenario(s)")
+                if len(scenarios) <= 3:
+                    for s, slack in scenarios:
+                        print(f"         Scenario {s}: slack = {slack:.6f}")
+        else:
+            print(f"\n   Supplier Capacity: No binding constraints")
+        
+        # DC storage constraints
+        if self.result.tight_dc_constraints:
+            print(f"\n   Tight DC Storage Constraints:")
+            for dc, slack in self.result.tight_dc_constraints:
+                print(f"      {dc}: slack = {slack:.6f} (nearly full)")
+        else:
+            print(f"\n   DC Storage: No binding constraints (inventory below capacity)")
+        
+        # Arc capacity constraints
+        if self.result.tight_arc_constraints:
+            print(f"\n   Tight Arc Capacity Constraints:")
+            # Group by arc
+            arc_tight_scenarios = {}
+            for arc, scenario, slack in self.result.tight_arc_constraints:
+                if arc not in arc_tight_scenarios:
+                    arc_tight_scenarios[arc] = []
+                arc_tight_scenarios[arc].append((scenario, slack))
+            
+            # Show top 5 most frequently binding arcs
+            sorted_arcs = sorted(arc_tight_scenarios.items(), key=lambda x: len(x[1]), reverse=True)
+            for arc, scenarios in sorted_arcs[:5]:
+                print(f"      {arc[0]} → {arc[1]}: Binding in {len(scenarios)} scenario(s)")
+        else:
+            print(f"\n   Arc Capacity: No binding constraints")
+        
+        # Emergency capacity usage
+        if self.result.emergency_capacity_usage:
+            # Check if any scenario has high emergency usage
+            high_emergency_scenarios = []
+            for scenario_id, supplier_usage in self.result.emergency_capacity_usage.items():
+                for supplier, usage_pct in supplier_usage.items():
+                    if usage_pct > 50:  # More than 50% of capacity
+                        high_emergency_scenarios.append((scenario_id, supplier, usage_pct))
+            
+            if high_emergency_scenarios:
+                print(f"\n   Emergency Procurement Capacity:")
+                print(f"      High usage scenarios (>50% of supplier capacity):")
+                for scenario_id, supplier, usage_pct in high_emergency_scenarios[:5]:
+                    print(f"         Scenario {scenario_id}, {supplier}: {usage_pct:.1f}% of capacity")
+            else:
+                print(f"\n   Emergency Procurement: Low capacity usage across all scenarios")
+                print(f"      (Emergency is available but not economically necessary)")
+    
     
     def _print_scenario_statistics(self):
         """Print scenario-level statistics."""

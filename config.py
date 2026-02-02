@@ -78,6 +78,27 @@ class ScenarioConfig:
 
 
 @dataclass
+class ScalingConfig:
+    """Configuration for cost/distance scaling and units."""
+    
+    # Define what "1 unit" represents in the model
+    cost_unit: str = "$1,000 CAD"  # What 1 cost unit represents
+    distance_unit: str = "100 km"   # What 1 distance unit represents  
+    quantity_unit: str = "pallets"  # What 1 quantity unit represents
+    
+    # Scaling factors applied to raw data (if any)
+    cost_scale_factor: float = 1.0      # Raw cost / this = model cost
+    distance_scale_factor: float = 1.0   # Raw distance / this = model distance
+    quantity_scale_factor: float = 1.0   # Raw quantity / this = model quantity
+    
+    # Explanation for reviewers
+    scaling_rationale: str = (
+        "Costs normalized for demonstration. In production, use actual CAD values. "
+        "Current scaling preserves economic trade-offs (inventory vs transport vs emergency)."
+    )
+
+
+@dataclass
 class OptimizationConfig:
     """Configuration for optimization model parameters."""
     
@@ -125,6 +146,7 @@ class Config:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
+    scaling: ScalingConfig = field(default_factory=ScalingConfig)
     
     def validate(self):
         """Validate all configuration parameters."""

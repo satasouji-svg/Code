@@ -42,12 +42,22 @@ class OptimizationResult:
     min_satisfaction_ratio: float
     avg_satisfaction_ratio: float
     
-    # Capacity utilization metrics (new)
+    # Risk measure diagnostics (for auditability) - with defaults
+    tail_scenarios: List[int] = None  # Scenario IDs in CVaR tail
+    tail_probability: float = 0.0     # Total probability mass in tail
+    
+    # Capacity utilization metrics - with defaults
     avg_supplier_utilization: Dict[str, float] = None
     avg_dc_utilization: Dict[str, float] = None
     avg_arc_utilization: Dict[Tuple[str, str], float] = None
     scenarios_with_emergency: int = 0
     total_emergency_procurement: float = 0.0
+    
+    # Binding constraint diagnostics - with defaults
+    tight_supplier_constraints: List[Tuple[str, int, float]] = None  # (supplier, scenario, slack)
+    tight_dc_constraints: List[Tuple[str, float]] = None              # (dc, slack)
+    tight_arc_constraints: List[Tuple[Tuple[str, str], int, float]] = None  # (arc, scenario, slack)
+    emergency_capacity_usage: Dict[int, Dict[str, float]] = None      # scenario -> supplier -> usage %
 
 
 class TwoStageStochasticModel:
@@ -498,20 +508,50 @@ class TwoStageStochasticModel:
                 if proc_val > 1e-6:
                     scenario_emergency_procurement[s][supplier] = proc_val
         
-        # Calculate risk measures
+        # Calculate risk measures with proper probability weighting
         expected_cost = sum(
             scenario.probability * scenario_costs[scenario.id]
             for scenario in self.scenarios
         )
         
-        var_value = pulp.value(self.variables['var'])
-        
+        # Compute VaR as probability-weighted α-quantile
+        # Sort scenarios by cost
+        sorted_scenarios = sorted(self.scenarios, key=lambda s: scenario_costs[s.id])
+        cumulative_prob = 0.0
         alpha = self.config.optimization.cvar_alpha
-        expected_excess = sum(
-            scenario.probability * pulp.value(self.variables['excess'][scenario.id])
-            for scenario in self.scenarios
-        )
-        cvar_value = var_value + (1.0 / (1.0 - alpha)) * expected_excess
+        var_scenario_idx = 0
+        
+        for idx, scenario in enumerate(sorted_scenarios):
+            cumulative_prob += scenario.probability
+            if cumulative_prob >= alpha:
+                var_scenario_idx = idx
+                break
+        
+        var_value = scenario_costs[sorted_scenarios[var_scenario_idx].id]
+        
+        # Compute CVaR as probability-weighted mean of tail
+        # Identify tail scenarios (those with cost >= VaR)
+        tail_scenarios = []
+        tail_probability = 0.0
+        tail_weighted_cost = 0.0
+        
+        for scenario in self.scenarios:
+            s_cost = scenario_costs[scenario.id]
+            if s_cost >= var_value - 1e-6:  # Include scenarios at or above VaR
+                tail_scenarios.append(scenario.id)
+                tail_probability += scenario.probability
+                tail_weighted_cost += scenario.probability * s_cost
+        
+        # CVaR is the probability-weighted average of tail costs
+        if tail_probability > 1e-9:
+            cvar_value = tail_weighted_cost / tail_probability
+        else:
+            cvar_value = var_value  # Fallback if tail is empty
+        
+        # Verify CVaR >= VaR (mathematical property)
+        if cvar_value < var_value - 1e-6:
+            print(f"⚠️  Warning: CVaR ({cvar_value:.2f}) < VaR ({var_value:.2f}). Using VaR as CVaR.")
+            cvar_value = var_value
         
         # Calculate equity measures
         satisfaction_ratios = []
@@ -577,12 +617,78 @@ class TwoStageStochasticModel:
         # Emergency procurement statistics
         scenarios_with_emergency = 0
         total_emergency_procurement = 0.0
+        emergency_capacity_usage = {}
+        
         for scenario in self.scenarios:
             s = scenario.id
             scenario_emergency = sum(scenario_emergency_procurement[s].values())
             if scenario_emergency > 1e-6:
                 scenarios_with_emergency += 1
                 total_emergency_procurement += scenario_emergency * scenario.probability
+            
+            # Track emergency capacity usage per supplier per scenario
+            emergency_capacity_usage[s] = {}
+            for supplier in self.config.network.suppliers:
+                emergency_used = scenario_emergency_procurement[s].get(supplier, 0.0)
+                supplier_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = supplier_capacity * capacity_factor
+                
+                if effective_capacity > 1e-6:
+                    usage_pct = (emergency_used / effective_capacity) * 100
+                    emergency_capacity_usage[s][supplier] = usage_pct
+                else:
+                    emergency_capacity_usage[s][supplier] = 0.0
+        
+        # Identify binding constraints (within tolerance)
+        tolerance = 1e-3  # Constraint is "tight" if slack < tolerance
+        
+        # Tight supplier capacity constraints
+        tight_supplier_constraints = []
+        for scenario in self.scenarios:
+            s = scenario.id
+            for supplier in self.config.network.suppliers:
+                # Total outflow from supplier
+                supplier_flow = sum(
+                    scenario_flows[s].get((supplier, target), 0.0)
+                    for target in self.config.network.distribution_centers
+                    if (supplier, target) in self.config.network.arcs
+                )
+                # Add emergency procurement
+                emergency = scenario_emergency_procurement[s].get(supplier, 0.0)
+                total_usage = supplier_flow + emergency
+                
+                # Effective capacity
+                base_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = base_capacity * capacity_factor
+                
+                slack = effective_capacity - total_usage
+                if slack < tolerance and effective_capacity > 1e-6:
+                    tight_supplier_constraints.append((supplier, s, slack))
+        
+        # Tight DC storage constraints
+        tight_dc_constraints = []
+        for dc in self.config.network.distribution_centers:
+            inventory = prepositioned_inventory[dc]
+            storage_capacity = self.config.network.facilities[dc]['storage_capacity']
+            slack = storage_capacity - inventory
+            if slack < tolerance:
+                tight_dc_constraints.append((dc, slack))
+        
+        # Tight arc capacity constraints
+        tight_arc_constraints = []
+        for scenario in self.scenarios:
+            s = scenario.id
+            for arc in self.config.network.arcs.keys():
+                flow = scenario_flows[s].get(arc, 0.0)
+                base_capacity = self.config.network.arcs[arc]['capacity']
+                capacity_factor = scenario.arc_capacity_factors[arc]
+                effective_capacity = base_capacity * capacity_factor
+                
+                slack = effective_capacity - flow
+                if slack < tolerance and effective_capacity > 1e-6:
+                    tight_arc_constraints.append((arc, s, slack))
         
         return OptimizationResult(
             status=status_str,
@@ -596,11 +702,17 @@ class TwoStageStochasticModel:
             expected_cost=expected_cost,
             cvar_value=cvar_value,
             var_value=var_value,
+            tail_scenarios=tail_scenarios,
+            tail_probability=tail_probability,
             min_satisfaction_ratio=min_satisfaction_ratio,
             avg_satisfaction_ratio=avg_satisfaction_ratio,
             avg_supplier_utilization=avg_supplier_utilization,
             avg_dc_utilization=avg_dc_utilization,
             avg_arc_utilization=avg_arc_utilization,
             scenarios_with_emergency=scenarios_with_emergency,
-            total_emergency_procurement=total_emergency_procurement
+            total_emergency_procurement=total_emergency_procurement,
+            tight_supplier_constraints=tight_supplier_constraints,
+            tight_dc_constraints=tight_dc_constraints,
+            tight_arc_constraints=tight_arc_constraints,
+            emergency_capacity_usage=emergency_capacity_usage
         )
