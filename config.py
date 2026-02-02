@@ -86,16 +86,24 @@ class ScalingConfig:
     distance_unit: str = "100 km"   # What 1 distance unit represents  
     quantity_unit: str = "pallets"  # What 1 quantity unit represents
     
-    # Scaling factors applied to raw data (if any)
-    cost_scale_factor: float = 1.0      # Raw cost / this = model cost
-    distance_scale_factor: float = 1.0   # Raw distance / this = model distance
-    quantity_scale_factor: float = 1.0   # Raw quantity / this = model quantity
+    # Scaling factors for transparent mapping (model value → real value)
+    cost_scale_factor: float = 1000.0    # Model $1 = Real $1,000 CAD
+    distance_scale_factor: float = 100.0  # Model 1 = Real 100 km
+    quantity_scale_factor: float = 1.0    # Model 1 = Real 1 pallet (no scaling)
     
     # Explanation for reviewers
     scaling_rationale: str = (
-        "Costs normalized for demonstration. In production, use actual CAD values. "
-        "Current scaling preserves economic trade-offs (inventory vs transport vs emergency)."
+        "Costs scaled by 1000× for numerical stability. All reported values use model units. "
+        "Mapping: Model $1 = Real $1,000 CAD. Economic trade-offs preserved."
     )
+    
+    def to_real_cost(self, model_cost: float) -> float:
+        """Convert model cost to real CAD dollars."""
+        return model_cost * self.cost_scale_factor
+    
+    def to_real_distance(self, model_distance: float) -> float:
+        """Convert model distance to real kilometers."""
+        return model_distance * self.distance_scale_factor
 
 
 @dataclass

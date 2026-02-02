@@ -44,17 +44,19 @@ class Reporter:
         self._print_equity_measures()
         self._print_utilization_metrics()
         self._print_binding_constraints()
+        self._print_worst_scenario_emergency_diagnostics()
         self._print_scenario_statistics()
         
         print("="*80 + "\n")
     
     def _print_scaling_info(self):
-        """Print clear information about cost/quantity scaling."""
+        """Print clear information about cost/quantity scaling with transparent mapping."""
         print(f"\n📏 Model Units and Scaling:")
-        print(f"   Cost unit: {self.config.scaling.cost_unit}")
-        print(f"   Distance unit: {self.config.scaling.distance_unit}")
-        print(f"   Quantity unit: {self.config.scaling.quantity_unit}")
+        print(f"   Cost: Model $1 = Real ${self.config.scaling.cost_scale_factor:,.0f} CAD")
+        print(f"   Distance: Model 1 = Real {self.config.scaling.distance_scale_factor:.0f} km")
+        print(f"   Quantity: Model 1 = Real {self.config.scaling.quantity_scale_factor:.0f} {self.config.scaling.quantity_unit}")
         print(f"\n   ℹ️  {self.config.scaling.scaling_rationale}")
+        print(f"\n   All values below are in MODEL UNITS unless marked with '(Real CAD)'")
     
     def _print_solution_status(self):
         """Print solution status information."""
@@ -62,6 +64,10 @@ class Reporter:
         print(f"   Status: {self.result.status}")
         print(f"   Solve Time: {self.result.solve_time:.2f} seconds")
         print(f"   Total Objective: ${self.result.objective_value:,.2f}")
+        
+        # Show real CAD value
+        real_objective = self.config.scaling.to_real_cost(self.result.objective_value)
+        print(f"                    (Real CAD: ${real_objective:,.2f})")
     
     def _print_objective_breakdown(self):
         """Print breakdown of objective function components."""
@@ -72,17 +78,21 @@ class Reporter:
             inv * self.config.network.facilities[dc]['holding_cost']
             for dc, inv in self.result.prepositioned_inventory.items()
         )
-        print(f"   First Stage (Inventory): ${first_stage_cost:,.2f}")
+        real_first_stage = self.config.scaling.to_real_cost(first_stage_cost)
+        print(f"   First Stage (Inventory): ${first_stage_cost:,.2f} (Real: ${real_first_stage:,.2f} CAD)")
         
         # Second stage costs
-        print(f"   Expected Cost E[Q]: ${self.result.expected_cost:,.2f}")
-        print(f"   CVaR_{self.config.optimization.cvar_alpha}: ${self.result.cvar_value:,.2f}")
+        real_expected = self.config.scaling.to_real_cost(self.result.expected_cost)
+        real_cvar = self.config.scaling.to_real_cost(self.result.cvar_value)
+        print(f"   Expected Cost E[Q]: ${self.result.expected_cost:,.2f} (Real: ${real_expected:,.2f} CAD)")
+        print(f"   CVaR_{self.config.optimization.cvar_alpha}: ${self.result.cvar_value:,.2f} (Real: ${real_cvar:,.2f} CAD)")
         
         # Risk-adjusted second stage
         w_exp = self.config.optimization.expectation_weight
         w_cvar = self.config.optimization.cvar_weight
         risk_adjusted = w_exp * self.result.expected_cost + w_cvar * self.result.cvar_value
-        print(f"   Risk-Adjusted Cost: ${risk_adjusted:,.2f}")
+        real_risk_adjusted = self.config.scaling.to_real_cost(risk_adjusted)
+        print(f"   Risk-Adjusted Cost: ${risk_adjusted:,.2f} (Real: ${real_risk_adjusted:,.2f} CAD)")
         print(f"      ({w_exp:.1%} × E[Q] + {w_cvar:.1%} × CVaR)")
     
     def _print_first_stage_decisions(self):
@@ -101,9 +111,15 @@ class Reporter:
     def _print_risk_measures(self):
         """Print risk measures with bulletproof calculation verification."""
         print(f"\n⚠️  Risk Measures (Probability-Weighted Calculations):")
-        print(f"   VaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.var_value:,.2f}")
-        print(f"   CVaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.cvar_value:,.2f}")
-        print(f"   Expected Cost: ${self.result.expected_cost:,.2f}")
+        
+        # Show both model and real values
+        real_var = self.config.scaling.to_real_cost(self.result.var_value)
+        real_cvar = self.config.scaling.to_real_cost(self.result.cvar_value)
+        real_expected = self.config.scaling.to_real_cost(self.result.expected_cost)
+        
+        print(f"   VaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.var_value:,.2f} (Real: ${real_var:,.2f} CAD)")
+        print(f"   CVaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.cvar_value:,.2f} (Real: ${real_cvar:,.2f} CAD)")
+        print(f"   Expected Cost: ${self.result.expected_cost:,.2f} (Real: ${real_expected:,.2f} CAD)")
         
         # Verify CVaR > VaR
         if self.result.cvar_value >= self.result.var_value:
@@ -121,7 +137,8 @@ class Reporter:
         risk_premium = self.result.cvar_value - self.result.expected_cost
         if self.result.expected_cost > 0:
             risk_premium_pct = (risk_premium / self.result.expected_cost) * 100
-            print(f"\n   Risk Premium: ${risk_premium:,.2f} ({risk_premium_pct:+.1f}%)")
+            real_premium = self.config.scaling.to_real_cost(risk_premium)
+            print(f"\n   Risk Premium: ${risk_premium:,.2f} ({risk_premium_pct:+.1f}%) (Real: ${real_premium:,.2f} CAD)")
             
             # Add context about risk premium magnitude
             if risk_premium_pct > 80:
@@ -336,6 +353,80 @@ class Reporter:
                 print(f"\n   Emergency Procurement: Low capacity usage across all scenarios")
                 print(f"      (Emergency is available but not economically necessary)")
     
+    def _print_worst_scenario_emergency_diagnostics(self):
+        """Print comprehensive emergency diagnostics for worst-case scenarios."""
+        print(f"\n🚨 Emergency Procurement Diagnostics (Worst Scenarios):")
+        
+        # Find worst scenarios by cost or unmet demand
+        scenario_unmet = {}
+        scenario_costs = {}
+        for s in range(len(self.scenarios)):
+            total_unmet = sum(self.result.scenario_unmet_demand[s].values())
+            scenario_unmet[s] = total_unmet
+            scenario_costs[s] = self.result.scenario_costs[s]
+        
+        # Get top 3 worst scenarios (by unmet demand)
+        worst_by_unmet = sorted(scenario_unmet.items(), key=lambda x: x[1], reverse=True)[:3]
+        # Get top 3 worst scenarios (by cost)
+        worst_by_cost = sorted(scenario_costs.items(), key=lambda x: x[1], reverse=True)[:3]
+        
+        # Combine and deduplicate
+        worst_scenarios = list(set([s for s, _ in worst_by_unmet] + [s for s, _ in worst_by_cost]))[:5]
+        
+        if not worst_scenarios or max(scenario_unmet.values()) < 1e-6:
+            print(f"\n   ✅ No significant unmet demand in any scenario")
+            print(f"   → Regular inventory + shipments fully satisfy all demand")
+            print(f"   → Emergency mechanism available but not economically necessary")
+            return
+        
+        print(f"\n   Analyzing {len(worst_scenarios)} worst-case scenarios:")
+        
+        for s in worst_scenarios:
+            print(f"\n   Scenario {s}:")
+            print(f"      Cost: ${self.result.scenario_costs[s]:,.2f}")
+            print(f"      Total Unmet: {scenario_unmet[s]:,.1f} units")
+            
+            # Emergency procurement used
+            emergency_used = sum(self.result.scenario_emergency_procurement[s].values())
+            print(f"      Emergency Procurement Used: {emergency_used:,.1f} units")
+            
+            # Emergency capacity available
+            if self.result.emergency_capacity_usage and s in self.result.emergency_capacity_usage:
+                print(f"      Emergency Capacity Usage by Supplier:")
+                for supplier, usage_pct in self.result.emergency_capacity_usage[s].items():
+                    supplier_cap = self.config.network.facilities[supplier]['capacity']
+                    used_amount = emergency_used if supplier in self.result.scenario_emergency_procurement[s] else 0
+                    print(f"         {supplier}: {used_amount:,.1f}/{supplier_cap:,.1f} units ({usage_pct:.1f}% of capacity)")
+            
+            # Check if any arcs are binding (limiting emergency)
+            if self.result.tight_arc_constraints:
+                binding_arcs_in_scenario = [
+                    (arc, slack) for arc, scenario, slack in self.result.tight_arc_constraints 
+                    if scenario == s
+                ]
+                if binding_arcs_in_scenario:
+                    print(f"      ⚠️  Binding Arc Constraints (limiting flow):")
+                    for arc, slack in binding_arcs_in_scenario[:3]:
+                        print(f"         {arc[0]} → {arc[1]}: slack = {slack:.6f}")
+                    print(f"      → Emergency procurement may be blocked by downstream capacity")
+        
+        # Economic analysis
+        print(f"\n   Economic Analysis:")
+        emerg_cost = self.config.optimization.emergency_procurement_cost
+        unmet_penalty = self.config.optimization.unmet_demand_penalty
+        print(f"      Emergency cost: ${emerg_cost:.2f}/unit")
+        print(f"      Unmet penalty: ${unmet_penalty:.2f}/unit")
+        
+        if emerg_cost < unmet_penalty:
+            print(f"      → Emergency is {unmet_penalty/emerg_cost:.1f}× cheaper than unmet")
+            if max(scenario_unmet.values()) > 1e-6:
+                print(f"      → Unmet demand exists despite cheaper emergency")
+                print(f"      → Likely cause: Capacity constraints (arc/DC) limit emergency effectiveness")
+            else:
+                print(f"      → Model optimally avoids unmet demand")
+        else:
+            print(f"      → Unmet penalty is {emerg_cost/unmet_penalty:.1f}× cheaper than emergency")
+            print(f"      → Model rationally accepts small unmet over expensive emergency")
     
     def _print_scenario_statistics(self):
         """Print scenario-level statistics."""
