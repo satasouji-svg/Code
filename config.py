@@ -61,8 +61,8 @@ class NetworkConfig:
 class ScenarioConfig:
     """Configuration for stochastic scenarios."""
     
-    # Number of scenarios
-    n_scenarios: int = 10
+    # Number of scenarios (increased to 100 for proper CVaR tail representation)
+    n_scenarios: int = 100
     
     # Scenario generation parameters
     demand_variability: float = 0.3  # Coefficient of variation for demand
@@ -77,8 +77,8 @@ class ScenarioConfig:
 class OptimizationConfig:
     """Configuration for optimization model parameters."""
     
-    # CVaR parameters
-    cvar_alpha: float = 0.95  # Confidence level for CVaR (95th percentile)
+    # CVaR parameters (adjusted for better tail representation with more scenarios)
+    cvar_alpha: float = 0.90  # Confidence level for CVaR (90th percentile)
     cvar_weight: float = 0.3  # Weight of CVaR in objective (0-1)
     expectation_weight: float = 0.7  # Weight of expected cost (should sum to 1 with cvar_weight)
     
@@ -99,9 +99,9 @@ class OptimizationConfig:
     big_m: float = 1e6  # Big-M value for logical constraints
     tolerance: float = 1e-6  # Numerical tolerance for constraint violations
     
-    # Solver parameters
+    # Solver parameters (tightened for paper-quality results)
     solver_time_limit: int = 300  # Maximum solver time in seconds
-    solver_gap: float = 0.01  # MIP gap tolerance (1%)
+    solver_gap: float = 1e-6  # MIP gap tolerance (near-zero for true optimality)
     
     def validate(self):
         """Validate configuration parameters."""

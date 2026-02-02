@@ -41,6 +41,13 @@ class OptimizationResult:
     # Equity measures
     min_satisfaction_ratio: float
     avg_satisfaction_ratio: float
+    
+    # Capacity utilization metrics (new)
+    avg_supplier_utilization: Dict[str, float] = None
+    avg_dc_utilization: Dict[str, float] = None
+    avg_arc_utilization: Dict[Tuple[str, str], float] = None
+    scenarios_with_emergency: int = 0
+    total_emergency_procurement: float = 0.0
 
 
 class TwoStageStochasticModel:
@@ -520,6 +527,63 @@ class TwoStageStochasticModel:
         min_satisfaction_ratio = min(satisfaction_ratios) if satisfaction_ratios else 0.0
         avg_satisfaction_ratio = np.mean(satisfaction_ratios) if satisfaction_ratios else 0.0
         
+        # Calculate capacity utilization metrics
+        # Supplier utilization
+        avg_supplier_utilization = {}
+        for supplier in self.config.network.suppliers:
+            total_usage = 0.0
+            total_capacity = 0.0
+            for scenario in self.scenarios:
+                s = scenario.id
+                # Sum outgoing flows from supplier
+                supplier_flow = sum(
+                    scenario_flows[s].get((supplier, target), 0.0)
+                    for target in self.config.network.distribution_centers
+                    if (supplier, target) in self.config.network.arcs
+                )
+                base_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = base_capacity * capacity_factor
+                
+                total_usage += supplier_flow * scenario.probability
+                total_capacity += effective_capacity * scenario.probability
+            
+            avg_supplier_utilization[supplier] = (total_usage / total_capacity * 100) if total_capacity > 0 else 0.0
+        
+        # DC utilization
+        avg_dc_utilization = {}
+        for dc in self.config.network.distribution_centers:
+            storage_cap = self.config.network.facilities[dc]['storage_capacity']
+            inventory = prepositioned_inventory[dc]
+            avg_dc_utilization[dc] = (inventory / storage_cap * 100) if storage_cap > 0 else 0.0
+        
+        # Arc utilization
+        avg_arc_utilization = {}
+        for arc in self.config.network.arcs.keys():
+            total_usage = 0.0
+            total_capacity = 0.0
+            for scenario in self.scenarios:
+                s = scenario.id
+                flow = scenario_flows[s].get(arc, 0.0)
+                base_capacity = self.config.network.arcs[arc]['capacity']
+                capacity_factor = scenario.arc_capacity_factors[arc]
+                effective_capacity = base_capacity * capacity_factor
+                
+                total_usage += flow * scenario.probability
+                total_capacity += effective_capacity * scenario.probability
+            
+            avg_arc_utilization[arc] = (total_usage / total_capacity * 100) if total_capacity > 0 else 0.0
+        
+        # Emergency procurement statistics
+        scenarios_with_emergency = 0
+        total_emergency_procurement = 0.0
+        for scenario in self.scenarios:
+            s = scenario.id
+            scenario_emergency = sum(scenario_emergency_procurement[s].values())
+            if scenario_emergency > 1e-6:
+                scenarios_with_emergency += 1
+                total_emergency_procurement += scenario_emergency * scenario.probability
+        
         return OptimizationResult(
             status=status_str,
             objective_value=pulp.value(self.model.objective),
@@ -533,5 +597,10 @@ class TwoStageStochasticModel:
             cvar_value=cvar_value,
             var_value=var_value,
             min_satisfaction_ratio=min_satisfaction_ratio,
-            avg_satisfaction_ratio=avg_satisfaction_ratio
+            avg_satisfaction_ratio=avg_satisfaction_ratio,
+            avg_supplier_utilization=avg_supplier_utilization,
+            avg_dc_utilization=avg_dc_utilization,
+            avg_arc_utilization=avg_arc_utilization,
+            scenarios_with_emergency=scenarios_with_emergency,
+            total_emergency_procurement=total_emergency_procurement
         )

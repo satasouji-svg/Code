@@ -139,10 +139,10 @@ Examples:
     )
     
     # Configuration arguments
-    parser.add_argument('--scenarios', type=int, default=10,
-                       help='Number of scenarios to generate (default: 10)')
-    parser.add_argument('--cvar-alpha', type=float, default=0.95,
-                       help='CVaR confidence level (default: 0.95)')
+    parser.add_argument('--scenarios', type=int, default=100,
+                       help='Number of scenarios to generate (default: 100)')
+    parser.add_argument('--cvar-alpha', type=float, default=0.90,
+                       help='CVaR confidence level (default: 0.90)')
     parser.add_argument('--cvar-weight', type=float, default=0.3,
                        help='Weight of CVaR in objective (default: 0.3)')
     parser.add_argument('--min-satisfaction', type=float, default=0.75,

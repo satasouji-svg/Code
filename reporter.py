@@ -33,12 +33,15 @@ class Reporter:
         print("\n" + "="*80)
         print("OPTIMIZATION SUMMARY")
         print("="*80)
+        print("\n⚠️  NOTE: All costs are normalized/scaled for demonstration purposes.")
+        print("         Results illustrate model behavior and solution quality.")
         
         self._print_solution_status()
         self._print_objective_breakdown()
         self._print_first_stage_decisions()
         self._print_risk_measures()
         self._print_equity_measures()
+        self._print_utilization_metrics()
         self._print_scenario_statistics()
         
         print("="*80 + "\n")
@@ -109,6 +112,48 @@ class Reporter:
             print(f"   ✅ Equity constraint satisfied")
         else:
             print(f"   ⚠️  Equity constraint violated")
+    
+    def _print_utilization_metrics(self):
+        """Print capacity utilization metrics."""
+        print(f"\n🏭 Capacity Utilization (Average across scenarios):")
+        
+        # Supplier utilization
+        if self.result.avg_supplier_utilization:
+            print(f"\n   Supplier Capacity:")
+            for supplier in sorted(self.result.avg_supplier_utilization.keys()):
+                util = self.result.avg_supplier_utilization[supplier]
+                print(f"      {supplier}: {util:.1f}%")
+        
+        # DC utilization
+        if self.result.avg_dc_utilization:
+            print(f"\n   Distribution Center Storage:")
+            for dc in sorted(self.result.avg_dc_utilization.keys()):
+                util = self.result.avg_dc_utilization[dc]
+                print(f"      {dc}: {util:.1f}%")
+        
+        # Top arc utilization
+        if self.result.avg_arc_utilization:
+            print(f"\n   Top Transport Arcs (>50% utilization):")
+            sorted_arcs = sorted(
+                self.result.avg_arc_utilization.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+            high_util_arcs = [(arc, util) for arc, util in sorted_arcs if util > 50]
+            if high_util_arcs:
+                for arc, util in high_util_arcs[:10]:  # Show top 10
+                    print(f"      {arc[0]} → {arc[1]}: {util:.1f}%")
+            else:
+                print(f"      None (all arcs below 50% utilization)")
+        
+        # Emergency procurement
+        if self.result.scenarios_with_emergency > 0:
+            print(f"\n   Emergency Actions:")
+            print(f"      Scenarios requiring emergency procurement: {self.result.scenarios_with_emergency}/{len(self.scenarios)}")
+            print(f"      Expected emergency procurement: {self.result.total_emergency_procurement:,.1f} units")
+        else:
+            print(f"\n   Emergency Actions:")
+            print(f"      No emergency procurement triggered in any scenario")
     
     def _print_scenario_statistics(self):
         """Print scenario-level statistics."""
