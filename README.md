@@ -1,6 +1,17 @@
 # Wildfire-Resilient Supply Network Optimization
 
-A complete, production-ready implementation of a two-stage stochastic Mixed-Integer Linear Program (MILP) for optimizing wildfire-resilient supply networks with CVaR (Conditional Value at Risk) and equity considerations.
+**✨ NEW: Publication-Ready Experiments Framework**
+
+A complete two-stage stochastic MILP model with comprehensive experimental validation across multiple network scales, parameter sweeps, and stress tests. See [PUBLISHABLE_RESULTS.md](PUBLISHABLE_RESULTS.md) for complete results.
+
+**Key Achievements:**
+- 📈 Scalability: 4 network instances (2,203 - 8,605 variables, solve in <0.3s)
+- 🔄 Parameter sweeps: Risk aversion (λ) and CVaR level (α) sensitivity
+- ⚡ Emergency triggers: Demonstrated in stress scenarios (45+ units)
+- ✅ Binding constraints: Validated emergency logic via path analysis
+- 📊 Trade-offs: Risk premium reduction from 47% (small) to 4% (large network)
+
+A production-ready implementation of a two-stage stochastic Mixed-Integer Linear Program (MILP) for optimizing wildfire-resilient supply networks with CVaR (Conditional Value at Risk) and equity considerations.
 
 ## 🆕 Latest Improvements (Publication-Ready)
 
@@ -26,6 +37,36 @@ This model has been hardened for academic publication with three critical enhanc
 - 100 scenarios for adequate tail resolution
 
 See [FINAL_IMPROVEMENTS.md](FINAL_IMPROVEMENTS.md) for complete details.
+
+---
+
+## 📊 Publishable Experiments (NEW)
+
+### Multiple Network Instances
+
+| Instance | Size (S-DC-D) | Variables | Solve Time | Risk Premium |
+|----------|---------------|-----------|------------|--------------|
+| **Small** | 3-2-4 | 2,203 | 0.058s | 47.0% |
+| **Medium** | 5-3-7 | 4,904 | 0.128s | 11.2% |
+| **Large** | 7-4-10 | 8,605 | 0.228s | 4.3% |
+| **Stress** | 5-3-7 (tight) | 4,904 | 0.110s | varies |
+
+### Parameter Sweep Results
+
+**Risk Weight (λ) Sweep:** Inventory increases 20% (730 → 880 units) as risk aversion increases (λ: 0.0 → 1.0), reducing CVaR by 5.3%
+
+**CVaR Level (α) Sweep:** VaR increases monotonically with confidence level (α: 0.80 → 0.95), demonstrating proper tail representation
+
+### Emergency Procurement Validation
+
+Stress instance demonstrates emergency triggers:
+- **45+ units** emergency procurement in 8 scenarios
+- **Binding constraints** at DC→D4 arcs prevent full satisfaction
+- **Economic validation**: Emergency $20/unit vs unmet $500/unit - model optimizes correctly
+
+**Conclusion:** Not a modeling bug - realistic capacity constraints limit emergency effectiveness
+
+See [PUBLISHABLE_RESULTS.md](PUBLISHABLE_RESULTS.md) for complete experimental results and analysis.
 
 ---
 
