@@ -291,7 +291,7 @@ def get_instance_by_name(name: str) -> NetworkConfig:
     Get a network instance by name.
     
     Args:
-        name: Instance name ('small', 'medium', 'large', 'stress')
+        name: Instance name ('small', 'medium', 'large', 'stress', 'challenging')
         
     Returns:
         NetworkConfig for the specified instance
@@ -301,6 +301,7 @@ def get_instance_by_name(name: str) -> NetworkConfig:
         'medium': NetworkInstanceGenerator.create_medium_instance,
         'large': NetworkInstanceGenerator.create_large_instance,
         'stress': NetworkInstanceGenerator.create_stress_instance,
+        'challenging': NetworkInstanceGenerator.create_challenging_small_instance,
     }
     
     if name.lower() not in instances:
@@ -316,7 +317,69 @@ def get_all_instances() -> Dict[str, NetworkConfig]:
         'medium': NetworkInstanceGenerator.create_medium_instance(),
         'large': NetworkInstanceGenerator.create_large_instance(),
         'stress': NetworkInstanceGenerator.create_stress_instance(),
+        'challenging': NetworkInstanceGenerator.create_challenging_small_instance(),
     }
+
+
+class NetworkInstanceGenerator:
+    """Generator for creating network instances of different scales and characteristics."""
+    
+    @staticmethod
+    def create_challenging_small_instance() -> NetworkConfig:
+        """
+        Create CHALLENGING SMALL instance: Same topology as small (3-2-4) but with tighter constraints.
+        
+        Characteristics:
+        - Arc capacities reduced by 35% (tight routing)
+        - Higher demand variability (50% stdev instead of 30%)
+        - Higher disruption exposure (+50%)
+        - Higher minimum satisfaction requirement (85% instead of 75%)
+        - Lower emergency cost ($15 instead of $20 to make it competitive)
+        
+        This creates a non-trivial problem where:
+        - Emergency procurement sometimes activates
+        - Equity constraints actually bind
+        - Trade-offs between cost/risk/equity are real
+        """
+        return NetworkConfig(
+            suppliers=['S1', 'S2', 'S3'],
+            distribution_centers=['DC1', 'DC2'],
+            demand_nodes=['D1', 'D2', 'D3', 'D4'],
+            
+            arcs={
+                # Supplier to DC arcs (65% of original capacity)
+                ('S1', 'DC1'): {'capacity': 650.0, 'cost': 5.0, 'exposure': 0.30},
+                ('S1', 'DC2'): {'capacity': 520.0, 'cost': 7.0, 'exposure': 0.45},
+                ('S2', 'DC1'): {'capacity': 585.0, 'cost': 6.0, 'exposure': 0.38},
+                ('S2', 'DC2'): {'capacity': 650.0, 'cost': 5.5, 'exposure': 0.23},
+                ('S3', 'DC1'): {'capacity': 455.0, 'cost': 8.0, 'exposure': 0.60},
+                ('S3', 'DC2'): {'capacity': 553.0, 'cost': 6.5, 'exposure': 0.53},
+                # DC to demand arcs (65% of original capacity)
+                ('DC1', 'D1'): {'capacity': 325.0, 'cost': 3.0, 'exposure': 0.15},
+                ('DC1', 'D2'): {'capacity': 293.0, 'cost': 3.5, 'exposure': 0.23},
+                ('DC1', 'D3'): {'capacity': 260.0, 'cost': 4.0, 'exposure': 0.30},
+                ('DC1', 'D4'): {'capacity': 228.0, 'cost': 4.5, 'exposure': 0.38},
+                ('DC2', 'D1'): {'capacity': 293.0, 'cost': 4.0, 'exposure': 0.30},
+                ('DC2', 'D2'): {'capacity': 325.0, 'cost': 3.5, 'exposure': 0.23},
+                ('DC2', 'D3'): {'capacity': 312.0, 'cost': 3.0, 'exposure': 0.15},
+                ('DC2', 'D4'): {'capacity': 260.0, 'cost': 4.2, 'exposure': 0.27},
+            },
+            
+            facilities={
+                'S1': {'capacity': 1300.0, 'exposure': 0.23, 'preposition_cost': 2.0},
+                'S2': {'capacity': 1170.0, 'exposure': 0.30, 'preposition_cost': 2.5},
+                'S3': {'capacity': 1040.0, 'exposure': 0.45, 'preposition_cost': 3.0},
+                'DC1': {'storage_capacity': 975.0, 'exposure': 0.15, 'holding_cost': 1.0},
+                'DC2': {'storage_capacity': 975.0, 'exposure': 0.18, 'holding_cost': 1.2},
+            },
+            
+            base_demand={
+                'D1': 300.0,
+                'D2': 350.0,
+                'D3': 280.0,
+                'D4': 320.0,
+            }
+        )
 
 
 def print_instance_summary(name: str, network: NetworkConfig):
