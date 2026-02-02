@@ -204,7 +204,7 @@ class NetworkInstanceGenerator:
         
         Characteristics:
         - 5 suppliers, 3 DCs, 7 demand nodes
-        - TIGHT capacities (60% of medium instance)
+        - TIGHT capacities (75% of medium instance - reduced from 60% for feasibility)
         - Higher exposure rates
         - LOWER emergency costs to make it viable
         - HIGHER equity requirements (95% instead of 75%)
@@ -216,62 +216,62 @@ class NetworkInstanceGenerator:
             demand_nodes=['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7'],
             
             arcs={
-                # Supplier to DC arcs - 60% of medium capacity
-                ('S1', 'DC1'): {'capacity': 540.0, 'cost': 5.0, 'exposure': 0.3},
-                ('S1', 'DC2'): {'capacity': 420.0, 'cost': 7.0, 'exposure': 0.4},
-                ('S1', 'DC3'): {'capacity': 480.0, 'cost': 6.5, 'exposure': 0.35},
+                # Supplier to DC arcs - 75% of medium capacity (increased from 60% for feasibility)
+                ('S1', 'DC1'): {'capacity': 675.0, 'cost': 5.0, 'exposure': 0.3},
+                ('S1', 'DC2'): {'capacity': 525.0, 'cost': 7.0, 'exposure': 0.4},
+                ('S1', 'DC3'): {'capacity': 600.0, 'cost': 6.5, 'exposure': 0.35},
                 
-                ('S2', 'DC1'): {'capacity': 510.0, 'cost': 6.0, 'exposure': 0.35},
-                ('S2', 'DC2'): {'capacity': 540.0, 'cost': 5.5, 'exposure': 0.25},
-                ('S2', 'DC3'): {'capacity': 450.0, 'cost': 6.8, 'exposure': 0.32},
+                ('S2', 'DC1'): {'capacity': 638.0, 'cost': 6.0, 'exposure': 0.35},
+                ('S2', 'DC2'): {'capacity': 675.0, 'cost': 5.5, 'exposure': 0.25},
+                ('S2', 'DC3'): {'capacity': 563.0, 'cost': 6.8, 'exposure': 0.32},
                 
-                ('S3', 'DC1'): {'capacity': 390.0, 'cost': 8.0, 'exposure': 0.5},
-                ('S3', 'DC2'): {'capacity': 480.0, 'cost': 6.5, 'exposure': 0.45},
-                ('S3', 'DC3'): {'capacity': 420.0, 'cost': 7.2, 'exposure': 0.4},
+                ('S3', 'DC1'): {'capacity': 488.0, 'cost': 8.0, 'exposure': 0.5},
+                ('S3', 'DC2'): {'capacity': 600.0, 'cost': 6.5, 'exposure': 0.45},
+                ('S3', 'DC3'): {'capacity': 525.0, 'cost': 7.2, 'exposure': 0.4},
                 
-                ('S4', 'DC1'): {'capacity': 450.0, 'cost': 6.8, 'exposure': 0.38},
-                ('S4', 'DC2'): {'capacity': 408.0, 'cost': 7.5, 'exposure': 0.42},
-                ('S4', 'DC3'): {'capacity': 492.0, 'cost': 6.0, 'exposure': 0.28},
+                ('S4', 'DC1'): {'capacity': 563.0, 'cost': 6.8, 'exposure': 0.38},
+                ('S4', 'DC2'): {'capacity': 510.0, 'cost': 7.5, 'exposure': 0.42},
+                ('S4', 'DC3'): {'capacity': 615.0, 'cost': 6.0, 'exposure': 0.28},
                 
-                ('S5', 'DC1'): {'capacity': 420.0, 'cost': 7.2, 'exposure': 0.45},
-                ('S5', 'DC2'): {'capacity': 450.0, 'cost': 6.8, 'exposure': 0.37},
-                ('S5', 'DC3'): {'capacity': 528.0, 'cost': 5.8, 'exposure': 0.26},
+                ('S5', 'DC1'): {'capacity': 525.0, 'cost': 7.2, 'exposure': 0.45},
+                ('S5', 'DC2'): {'capacity': 563.0, 'cost': 6.8, 'exposure': 0.37},
+                ('S5', 'DC3'): {'capacity': 660.0, 'cost': 5.8, 'exposure': 0.26},
                 
-                # DC to demand arcs - 60% of medium capacity  
-                ('DC1', 'D1'): {'capacity': 240.0, 'cost': 3.0, 'exposure': 0.15},
-                ('DC1', 'D2'): {'capacity': 228.0, 'cost': 3.5, 'exposure': 0.20},
-                ('DC1', 'D3'): {'capacity': 210.0, 'cost': 4.0, 'exposure': 0.25},
-                ('DC1', 'D4'): {'capacity': 192.0, 'cost': 4.5, 'exposure': 0.30},
-                ('DC1', 'D5'): {'capacity': 216.0, 'cost': 3.8, 'exposure': 0.23},
-                ('DC1', 'D6'): {'capacity': 204.0, 'cost': 4.2, 'exposure': 0.27},
-                ('DC1', 'D7'): {'capacity': 198.0, 'cost': 4.3, 'exposure': 0.28},
+                # DC to demand arcs - 75% of medium capacity  
+                ('DC1', 'D1'): {'capacity': 300.0, 'cost': 3.0, 'exposure': 0.15},
+                ('DC1', 'D2'): {'capacity': 285.0, 'cost': 3.5, 'exposure': 0.20},
+                ('DC1', 'D3'): {'capacity': 263.0, 'cost': 4.0, 'exposure': 0.25},
+                ('DC1', 'D4'): {'capacity': 240.0, 'cost': 4.5, 'exposure': 0.30},
+                ('DC1', 'D5'): {'capacity': 270.0, 'cost': 3.8, 'exposure': 0.23},
+                ('DC1', 'D6'): {'capacity': 255.0, 'cost': 4.2, 'exposure': 0.27},
+                ('DC1', 'D7'): {'capacity': 248.0, 'cost': 4.3, 'exposure': 0.28},
                 
-                ('DC2', 'D1'): {'capacity': 228.0, 'cost': 4.0, 'exposure': 0.25},
-                ('DC2', 'D2'): {'capacity': 252.0, 'cost': 3.5, 'exposure': 0.20},
-                ('DC2', 'D3'): {'capacity': 240.0, 'cost': 3.0, 'exposure': 0.15},
-                ('DC2', 'D4'): {'capacity': 216.0, 'cost': 4.2, 'exposure': 0.23},
-                ('DC2', 'D5'): {'capacity': 234.0, 'cost': 3.6, 'exposure': 0.19},
-                ('DC2', 'D6'): {'capacity': 222.0, 'cost': 3.9, 'exposure': 0.22},
-                ('DC2', 'D7'): {'capacity': 210.0, 'cost': 4.1, 'exposure': 0.24},
+                ('DC2', 'D1'): {'capacity': 285.0, 'cost': 4.0, 'exposure': 0.25},
+                ('DC2', 'D2'): {'capacity': 315.0, 'cost': 3.5, 'exposure': 0.20},
+                ('DC2', 'D3'): {'capacity': 300.0, 'cost': 3.0, 'exposure': 0.15},
+                ('DC2', 'D4'): {'capacity': 270.0, 'cost': 4.2, 'exposure': 0.23},
+                ('DC2', 'D5'): {'capacity': 293.0, 'cost': 3.6, 'exposure': 0.19},
+                ('DC2', 'D6'): {'capacity': 278.0, 'cost': 3.9, 'exposure': 0.22},
+                ('DC2', 'D7'): {'capacity': 263.0, 'cost': 4.1, 'exposure': 0.24},
                 
-                ('DC3', 'D1'): {'capacity': 216.0, 'cost': 4.5, 'exposure': 0.30},
-                ('DC3', 'D2'): {'capacity': 234.0, 'cost': 4.0, 'exposure': 0.25},
-                ('DC3', 'D3'): {'capacity': 246.0, 'cost': 3.2, 'exposure': 0.17},
-                ('DC3', 'D4'): {'capacity': 228.0, 'cost': 3.8, 'exposure': 0.21},
-                ('DC3', 'D5'): {'capacity': 252.0, 'cost': 3.4, 'exposure': 0.18},
-                ('DC3', 'D6'): {'capacity': 240.0, 'cost': 3.7, 'exposure': 0.20},
-                ('DC3', 'D7'): {'capacity': 222.0, 'cost': 4.0, 'exposure': 0.23},
+                ('DC3', 'D1'): {'capacity': 270.0, 'cost': 4.5, 'exposure': 0.30},
+                ('DC3', 'D2'): {'capacity': 293.0, 'cost': 4.0, 'exposure': 0.25},
+                ('DC3', 'D3'): {'capacity': 308.0, 'cost': 3.2, 'exposure': 0.17},
+                ('DC3', 'D4'): {'capacity': 285.0, 'cost': 3.8, 'exposure': 0.21},
+                ('DC3', 'D5'): {'capacity': 315.0, 'cost': 3.4, 'exposure': 0.18},
+                ('DC3', 'D6'): {'capacity': 300.0, 'cost': 3.7, 'exposure': 0.20},
+                ('DC3', 'D7'): {'capacity': 278.0, 'cost': 4.0, 'exposure': 0.23},
             },
             
             facilities={
-                'S1': {'capacity': 1440.0, 'exposure': 0.25, 'preposition_cost': 2.0},
-                'S2': {'capacity': 1320.0, 'exposure': 0.3, 'preposition_cost': 2.5},
-                'S3': {'capacity': 1200.0, 'exposure': 0.4, 'preposition_cost': 3.0},
-                'S4': {'capacity': 1260.0, 'exposure': 0.35, 'preposition_cost': 2.7},
-                'S5': {'capacity': 1380.0, 'exposure': 0.28, 'preposition_cost': 2.2},
-                'DC1': {'storage_capacity': 1080.0, 'exposure': 0.15, 'holding_cost': 1.0},
-                'DC2': {'storage_capacity': 1140.0, 'exposure': 0.17, 'holding_cost': 1.2},
-                'DC3': {'storage_capacity': 1200.0, 'exposure': 0.13, 'holding_cost': 0.9},
+                'S1': {'capacity': 1800.0, 'exposure': 0.25, 'preposition_cost': 2.0},
+                'S2': {'capacity': 1650.0, 'exposure': 0.3, 'preposition_cost': 2.5},
+                'S3': {'capacity': 1500.0, 'exposure': 0.4, 'preposition_cost': 3.0},
+                'S4': {'capacity': 1575.0, 'exposure': 0.35, 'preposition_cost': 2.7},
+                'S5': {'capacity': 1725.0, 'exposure': 0.28, 'preposition_cost': 2.2},
+                'DC1': {'storage_capacity': 1350.0, 'exposure': 0.15, 'holding_cost': 1.0},
+                'DC2': {'storage_capacity': 1425.0, 'exposure': 0.17, 'holding_cost': 1.2},
+                'DC3': {'storage_capacity': 1500.0, 'exposure': 0.13, 'holding_cost': 0.9},
             },
             
             base_demand={
