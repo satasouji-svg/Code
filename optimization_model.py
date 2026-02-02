@@ -42,6 +42,9 @@ class OptimizationResult:
     min_satisfaction_ratio: float
     avg_satisfaction_ratio: float
     
+    # Q1 fix: leftover inventory (with default)
+    scenario_leftover_inventory: Dict[int, Dict[str, float]] = None  
+    
     # Risk measure diagnostics (for auditability) - with defaults
     tail_scenarios: List[int] = None  # Scenario IDs in CVaR tail
     tail_probability: float = 0.0     # Total probability mass in tail
@@ -125,6 +128,7 @@ class TwoStageStochasticModel:
         self.variables['flow'] = {}
         self.variables['unmet_demand'] = {}
         self.variables['emergency_procurement'] = {}
+        self.variables['leftover_inventory'] = {}  # Q1 fix: leftover inventory
         
         for scenario in self.scenarios:
             s = scenario.id
@@ -152,6 +156,15 @@ class TwoStageStochasticModel:
             for supplier in net.suppliers:
                 self.variables['emergency_procurement'][s][supplier] = pulp.LpVariable(
                     f"emergency_proc_{supplier}_s{s}",
+                    lowBound=0,
+                    cat='Continuous'
+                )
+            
+            # Q1 fix: Leftover inventory at each DC (inventory not used in this scenario)
+            self.variables['leftover_inventory'][s] = {}
+            for dc in net.distribution_centers:
+                self.variables['leftover_inventory'][s][dc] = pulp.LpVariable(
+                    f"leftover_inv_{dc}_s{s}",
                     lowBound=0,
                     cat='Continuous'
                 )
@@ -185,11 +198,13 @@ class TwoStageStochasticModel:
     def _add_second_stage_constraints(self):
         """Add second stage constraints for recourse decisions."""
         net = self.config.network
+        opt = self.config.optimization
         
         for scenario in self.scenarios:
             s = scenario.id
             
             # === Flow conservation at distribution centers ===
+            # Q1 fix: Allow leftover inventory instead of forcing full usage
             for dc in net.distribution_centers:
                 # Inflow from suppliers
                 inflow = pulp.lpSum([
@@ -208,11 +223,46 @@ class TwoStageStochasticModel:
                 # Add prepositioned inventory
                 inventory = self.variables['inventory'][dc]
                 
-                # Conservation: inflow + inventory = outflow
+                # Leftover inventory (what's not shipped out)
+                leftover = self.variables['leftover_inventory'][s][dc]
+                
+                # Q1 FIX: Conservation now allows leftover
+                # inflow + inventory = outflow + leftover
+                # (Previously was: inflow + inventory = outflow, forcing full usage)
                 self.model += (
-                    inflow + inventory == outflow,
+                    inflow + inventory == outflow + leftover,
                     f"flow_conservation_{dc}_s{s}"
                 )
+            
+            # === Q1 FIX: DC throughput constraints (apply facility disruption factors) ===
+            # Previously, DC disruptions were generated but not applied to operations
+            for dc in net.distribution_centers:
+                # Get DC disruption factor
+                capacity_factor = scenario.facility_capacity_factors[dc]
+                storage_cap = net.facilities[dc]['storage_capacity']
+                
+                # Apply disruption to throughput capacity
+                # Total outflow from DC cannot exceed disrupted storage capacity
+                total_outflow = pulp.lpSum([
+                    self.variables['flow'][s][(dc, target)]
+                    for target in net.demand_nodes
+                    if (dc, target) in net.arcs
+                ])
+                
+                effective_throughput = storage_cap * capacity_factor
+                
+                # Only add constraint if capacity is non-negligible
+                if effective_throughput > opt.tolerance:
+                    self.model += (
+                        total_outflow <= effective_throughput,
+                        f"dc_throughput_{dc}_s{s}"
+                    )
+                else:
+                    # DC is severely disrupted - force minimal throughput
+                    self.model += (
+                        total_outflow <= opt.tolerance,
+                        f"dc_disrupted_{dc}_s{s}"
+                    )
             
             # === Capacity constraints on arcs ===
             for arc, arc_data in net.arcs.items():
@@ -221,7 +271,7 @@ class TwoStageStochasticModel:
                 effective_capacity = base_capacity * capacity_factor
                 
                 # Only add constraint if effective capacity is non-negligible
-                if effective_capacity > self.config.optimization.tolerance:
+                if effective_capacity > opt.tolerance:
                     self.model += (
                         self.variables['flow'][s][arc] <= effective_capacity,
                         f"arc_capacity_{arc[0]}_{arc[1]}_s{s}"
@@ -249,10 +299,18 @@ class TwoStageStochasticModel:
                 # Add emergency procurement
                 emergency = self.variables['emergency_procurement'][s][supplier]
                 
-                # Capacity constraint
+                # Capacity constraint (emergency allows exceeding base capacity)
                 self.model += (
                     total_outflow <= effective_capacity + emergency,
                     f"supplier_capacity_{supplier}_s{s}"
+                )
+                
+                # Q1 FIX: Cap emergency procurement to realistic limit
+                # Emergency cannot exceed a fraction of base capacity
+                emergency_cap = base_capacity * opt.emergency_capacity_fraction
+                self.model += (
+                    emergency <= emergency_cap,
+                    f"emergency_cap_{supplier}_s{s}"
                 )
             
             # === Demand satisfaction constraints ===
@@ -358,7 +416,14 @@ class TwoStageStochasticModel:
             for node in net.demand_nodes
         ])
         
-        return transport_cost + emergency_cost + penalty_cost
+        # Q1 FIX: Leftover inventory disposal/holding costs
+        leftover_cost = pulp.lpSum([
+            self.variables['leftover_inventory'][scenario_id][dc]
+            * opt.leftover_disposal_cost
+            for dc in net.distribution_centers
+        ])
+        
+        return transport_cost + emergency_cost + penalty_cost + leftover_cost
     
     def _set_objective(self):
         """
@@ -479,6 +544,7 @@ class TwoStageStochasticModel:
         scenario_flows = {}
         scenario_unmet_demand = {}
         scenario_emergency_procurement = {}
+        scenario_leftover_inventory = {}  # Q1 fix: track leftover
         
         for scenario in self.scenarios:
             s = scenario.id
@@ -507,6 +573,13 @@ class TwoStageStochasticModel:
                 proc_val = pulp.value(self.variables['emergency_procurement'][s][supplier])
                 if proc_val > 1e-6:
                     scenario_emergency_procurement[s][supplier] = proc_val
+            
+            # Q1 fix: Leftover inventory
+            scenario_leftover_inventory[s] = {}
+            for dc in self.config.network.distribution_centers:
+                leftover_val = pulp.value(self.variables['leftover_inventory'][s][dc])
+                if leftover_val > 1e-6:
+                    scenario_leftover_inventory[s][dc] = leftover_val
         
         # Calculate risk measures with proper probability weighting
         expected_cost = sum(
@@ -699,6 +772,7 @@ class TwoStageStochasticModel:
             scenario_flows=scenario_flows,
             scenario_unmet_demand=scenario_unmet_demand,
             scenario_emergency_procurement=scenario_emergency_procurement,
+            scenario_leftover_inventory=scenario_leftover_inventory,  # Q1 fix: include leftover
             expected_cost=expected_cost,
             cvar_value=cvar_value,
             var_value=var_value,

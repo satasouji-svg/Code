@@ -117,7 +117,7 @@ class OptimizationConfig:
     
     # Equity parameters
     min_demand_satisfaction: float = 0.75  # Minimum fraction of demand that must be satisfied
-    equity_penalty: float = 1000.0  # Penalty for not meeting equity constraints
+    # Note: equity_penalty removed - equity is enforced as hard constraint, not penalized
     
     # Penalty parameters (properly scaled to avoid inflation)
     unmet_demand_penalty: float = 500.0  # Per unit penalty for unmet demand
@@ -127,6 +127,11 @@ class OptimizationConfig:
     
     # Second stage costs (recourse)
     emergency_procurement_cost: float = 20.0  # Cost per unit of emergency procurement
+    
+    # Emergency procurement limits (Q1 fix: add explicit caps)
+    # Emergency capacity as fraction of base supplier capacity
+    emergency_capacity_fraction: float = 0.5  # Emergency can provide up to 50% of base capacity
+    leftover_disposal_cost: float = 0.5  # Cost per unit of leftover inventory (optional penalty)
     
     # Numerical stability parameters
     big_m: float = 1e6  # Big-M value for logical constraints
