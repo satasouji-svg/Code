@@ -116,7 +116,25 @@ python main.py --seed 123
 
 ## Important Notes
 
-**Cost Scaling**: All costs in this implementation are normalized/scaled for demonstration purposes. The model illustrates optimization behavior and solution quality rather than representing actual dollar amounts. For production use, costs should be scaled to match real-world magnitudes.
+### Model Units and Scaling
+
+The model uses clearly defined units for transparency:
+- **Cost unit**: $1,000 CAD
+- **Distance unit**: 100 km  
+- **Quantity unit**: pallets
+
+These units are configurable in `config.py` under `ScalingConfig`. Costs are normalized for demonstration purposes, but the scaling preserves economic trade-offs (inventory vs transport vs emergency). For production use, simply adjust the scaling factors to match real-world data.
+
+### Publication-Ready Features
+
+This implementation includes several features specifically designed for academic publication and peer review:
+
+1. **Bulletproof VaR/CVaR Calculation**: Probability-weighted calculations with tail membership diagnostics
+2. **Binding Constraint Diagnostics**: Automatic detection of tight capacity constraints
+3. **Stress Tests**: Automated validation of penalty and risk aversion monotonicity
+4. **Transparent Reporting**: All calculations are auditable with clear explanations
+
+See `PUBLICATION_READY.md` for detailed documentation of these features.
 
 **CVaR Configuration**: The default configuration uses 100 scenarios with α=0.90 (90th percentile) to ensure proper tail risk representation. With fewer scenarios, CVaR can collapse to the worst-case scenario cost. The tail probability (1-α) should be representable with the number of scenarios used.
 
@@ -125,13 +143,16 @@ python main.py --seed 123
 The project follows a modular architecture with clear separation of concerns:
 
 ```
-├── config.py                 # Configuration management
+├── config.py                 # Configuration management (with ScalingConfig)
 ├── scenario_generator.py     # Stochastic scenario generation
 ├── data_validator.py         # Input data validation
-├── optimization_model.py     # Two-stage MILP formulation
-├── reporter.py              # Results reporting
+├── optimization_model.py     # Two-stage MILP formulation (with binding diagnostics)
+├── reporter.py              # Results reporting (with enhanced diagnostics)
 ├── visualizer.py            # Visualization generation
 ├── main.py                  # Main execution pipeline
+├── test_model.py            # Unit tests
+├── test_stress.py           # Stress tests for model validation
+├── examples.py              # Advanced examples and sensitivity analysis
 └── requirements.txt         # Python dependencies
 ```
 
@@ -142,12 +163,14 @@ Defines all configuration parameters including:
 - Network topology (nodes, arcs, capacities)
 - Scenario generation parameters
 - Optimization parameters (CVaR, penalties, solver settings)
+- **NEW**: ScalingConfig for unit definitions ($1K CAD, pallets, 100km)
 
 #### `scenario_generator.py`
 Generates stochastic scenarios with:
 - Lognormal demand variation
 - Exposure-based disruption modeling
 - Capacity reduction factors
+- Demand shock capping at 3.5σ for realism
 
 #### `data_validator.py`
 Validates all input data for:
@@ -160,14 +183,17 @@ Validates all input data for:
 Implements the two-stage stochastic MILP:
 - First-stage: Inventory prepositioning
 - Second-stage: Routing and procurement
-- CVaR formulation with auxiliary variables
+- **NEW**: Probability-weighted VaR/CVaR calculation
+- **NEW**: Binding constraint diagnostics (supplier, DC, arc capacity)
 - Equity constraints
 
 #### `reporter.py`
 Generates comprehensive reports:
 - Solution status and objective breakdown
-- Risk measures (VaR, CVaR, expected cost)
-- Equity measures
+- Risk measures (VaR, CVaR, expected cost) with tail diagnostics
+- Equity measures with worst-case identification
+- **NEW**: Binding constraint diagnostics section
+- **NEW**: Supplier cost dominance analysis
 - Scenario-level statistics
 
 #### `visualizer.py`
@@ -177,17 +203,62 @@ Creates visualizations:
 - Inventory allocation
 - Risk analysis plots
 
+#### `test_stress.py`
+Automated stress tests for model validation:
+- Penalty monotonicity test
+- Risk aversion monotonicity test
+- Provides diagnostic output for reviewers
+
+## Testing
+
+### Unit Tests
+
+Run the test suite to verify all components:
+
+```bash
+python test_model.py
+```
+
+Tests include:
+- Configuration validation
+- Scenario generation
+- Data validation
+- Model building
+- Optimization solving
+- Parameter sensitivity
+
+### Stress Tests
+
+Run automated stress tests to validate model sanity:
+
+```bash
+python test_stress.py
+```
+
+These tests verify:
+1. **Penalty Monotonicity**: Higher unmet penalty → Lower unmet demand
+2. **Risk Aversion Monotonicity**: Higher CVaR weight → Lower CVaR or higher inventory
+
+Expected output:
+```
+✅ PASS: Penalty Monotonicity
+✅ PASS: Risk Aversion
+✅ ALL STRESS TESTS PASSED
+```
+
 ## Output
 
 The optimization produces:
 
 1. **Console Output**: Real-time progress and comprehensive summary including:
+   - **Model units and scaling** (cost=$1K CAD, quantity=pallets)
    - Solution status and objective value
    - First-stage decisions (inventory allocation)
-   - Risk measures (VaR, CVaR, expected cost)
-   - Equity measures (demand satisfaction rates)
-   - **Capacity utilization** (suppliers, DCs, transport arcs)
-   - **Emergency procurement statistics**
+   - Risk measures (VaR, CVaR, expected cost) **with tail diagnostics**
+   - Equity measures (demand satisfaction rates) with worst-case identification
+   - Capacity utilization (suppliers, DCs, transport arcs)
+   - **Binding constraint diagnostics** (which constraints limit the solution)
+   - Emergency procurement statistics
    - Scenario cost distribution
    
 2. **Detailed Report**: Text file (`results/optimization_report.txt`) with comprehensive results
