@@ -82,11 +82,11 @@ python main.py
 ### Command-Line Options
 
 ```bash
-# Run with 20 scenarios
-python main.py --scenarios 20
+# Run with 50 scenarios (faster than default 100)
+python main.py --scenarios 50
 
-# Adjust CVaR settings
-python main.py --cvar-alpha 0.90 --cvar-weight 0.5
+# Adjust CVaR settings for more risk aversion
+python main.py --cvar-alpha 0.95 --cvar-weight 0.5
 
 # Change minimum demand satisfaction
 python main.py --min-satisfaction 0.80
@@ -104,8 +104,8 @@ python main.py --seed 123
 ### Full Options
 
 ```
---scenarios N           Number of scenarios (default: 10)
---cvar-alpha ALPHA      CVaR confidence level (default: 0.95)
+--scenarios N           Number of scenarios (default: 100)
+--cvar-alpha ALPHA      CVaR confidence level (default: 0.90)
 --cvar-weight WEIGHT    Weight of CVaR in objective (default: 0.3)
 --min-satisfaction P    Minimum demand satisfaction (default: 0.75)
 --output-dir DIR        Output directory (default: results)
@@ -113,6 +113,12 @@ python main.py --seed 123
 --no-plots              Skip visualizations
 --seed N                Random seed (default: 42)
 ```
+
+## Important Notes
+
+**Cost Scaling**: All costs in this implementation are normalized/scaled for demonstration purposes. The model illustrates optimization behavior and solution quality rather than representing actual dollar amounts. For production use, costs should be scaled to match real-world magnitudes.
+
+**CVaR Configuration**: The default configuration uses 100 scenarios with α=0.90 (90th percentile) to ensure proper tail risk representation. With fewer scenarios, CVaR can collapse to the worst-case scenario cost. The tail probability (1-α) should be representable with the number of scenarios used.
 
 ## Architecture
 
@@ -175,9 +181,18 @@ Creates visualizations:
 
 The optimization produces:
 
-1. **Console Output**: Real-time progress and summary statistics
-2. **Detailed Report**: Text file with comprehensive results
-3. **Visualizations**: 
+1. **Console Output**: Real-time progress and comprehensive summary including:
+   - Solution status and objective value
+   - First-stage decisions (inventory allocation)
+   - Risk measures (VaR, CVaR, expected cost)
+   - Equity measures (demand satisfaction rates)
+   - **Capacity utilization** (suppliers, DCs, transport arcs)
+   - **Emergency procurement statistics**
+   - Scenario cost distribution
+   
+2. **Detailed Report**: Text file (`results/optimization_report.txt`) with comprehensive results
+
+3. **Visualizations** (PNG files in `results/` directory): 
    - `scenario_costs.png`: Cost distribution with risk measures
    - `demand_satisfaction.png`: Satisfaction rates by node
    - `inventory_allocation.png`: Prepositioned inventory
@@ -271,11 +286,11 @@ Modify `scenario_generator.py`:
 ## Performance
 
 Typical performance on a modern laptop:
-- **10 scenarios**: ~5-10 seconds
-- **50 scenarios**: ~30-60 seconds
-- **100 scenarios**: ~2-5 minutes
+- **50 scenarios**: ~0.02 seconds
+- **100 scenarios**: ~0.05 seconds  
+- **200 scenarios**: ~0.2-0.5 seconds
 
-Scales approximately linearly with number of scenarios.
+Scales approximately linearly with number of scenarios. The CBC solver with near-zero MIP gap (1e-6) achieves optimal solutions quickly for this problem size.
 
 ## Validation
 
