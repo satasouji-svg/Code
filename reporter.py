@@ -89,7 +89,7 @@ class Reporter:
         print(f"   Total: {total_inventory:,.1f} units")
     
     def _print_risk_measures(self):
-        """Print risk measures."""
+        """Print risk measures with context about stress-testing."""
         print(f"\n⚠️  Risk Measures:")
         print(f"   VaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.var_value:,.2f}")
         print(f"   CVaR at {self.config.optimization.cvar_alpha:.1%}: ${self.result.cvar_value:,.2f}")
@@ -100,11 +100,21 @@ class Reporter:
         if self.result.expected_cost > 0:
             risk_premium_pct = (risk_premium / self.result.expected_cost) * 100
             print(f"   Risk Premium: ${risk_premium:,.2f} ({risk_premium_pct:+.1f}%)")
+            
+            # Add context about risk premium magnitude
+            if risk_premium_pct > 80:
+                print(f"\n   ℹ️  Note: Large risk premium indicates heavy-tailed cost distribution")
+                print(f"      This model uses stress-testing scenario generation with demand shocks")
+                print(f"      capped at {self.config.scenario.max_sigma_deviation}σ to represent extreme events")
+                print(f"      while maintaining computational tractability.")
     
     def _print_equity_measures(self):
-        """Print equity measures."""
+        """Print equity measures with clear definitions."""
         print(f"\n⚖️  Equity Measures:")
-        print(f"   Minimum Demand Satisfaction: {self.result.min_satisfaction_ratio:.1%}")
+        print(f"   (Definitions: Minimum = min over all (scenario, node) pairs;")
+        print(f"                Average = probability-weighted mean over all (scenario, node) pairs)")
+        
+        print(f"\n   Minimum Demand Satisfaction: {self.result.min_satisfaction_ratio:.1%}")
         print(f"   Average Demand Satisfaction: {self.result.avg_satisfaction_ratio:.1%}")
         print(f"   Required Minimum: {self.config.optimization.min_demand_satisfaction:.1%}")
         
@@ -112,17 +122,41 @@ class Reporter:
             print(f"   ✅ Equity constraint satisfied")
         else:
             print(f"   ⚠️  Equity constraint violated")
+        
+        # Find and report worst-case equity violations
+        worst_satisfaction = 1.0
+        worst_node = None
+        worst_scenario = None
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            for node in self.config.network.demand_nodes:
+                demand = scenario.demand[node]
+                unmet = self.result.scenario_unmet_demand[s][node]
+                if demand > 0:
+                    satisfaction = (demand - unmet) / demand
+                    if satisfaction < worst_satisfaction:
+                        worst_satisfaction = satisfaction
+                        worst_node = node
+                        worst_scenario = s
+        
+        if worst_node is not None:
+            print(f"\n   Worst Case: Node {worst_node} in Scenario {worst_scenario} ({worst_satisfaction:.1%} satisfied)")
     
     def _print_utilization_metrics(self):
-        """Print capacity utilization metrics."""
+        """Print capacity utilization metrics with cost dominance analysis."""
         print(f"\n🏭 Capacity Utilization (Average across scenarios):")
         
-        # Supplier utilization
+        # Supplier utilization with cost dominance explanation
         if self.result.avg_supplier_utilization:
             print(f"\n   Supplier Capacity:")
             for supplier in sorted(self.result.avg_supplier_utilization.keys()):
                 util = self.result.avg_supplier_utilization[supplier]
                 print(f"      {supplier}: {util:.1f}%")
+            
+            # Add supplier cost dominance analysis
+            print(f"\n   📊 Supplier Cost Analysis (explains utilization patterns):")
+            self._print_supplier_cost_dominance()
         
         # DC utilization
         if self.result.avg_dc_utilization:
@@ -146,7 +180,7 @@ class Reporter:
             else:
                 print(f"      None (all arcs below 50% utilization)")
         
-        # Emergency procurement
+        # Emergency procurement with economic analysis
         if self.result.scenarios_with_emergency > 0:
             print(f"\n   Emergency Actions:")
             print(f"      Scenarios requiring emergency procurement: {self.result.scenarios_with_emergency}/{len(self.scenarios)}")
@@ -154,6 +188,65 @@ class Reporter:
         else:
             print(f"\n   Emergency Actions:")
             print(f"      No emergency procurement triggered in any scenario")
+            self._print_emergency_economics()
+    
+    def _print_supplier_cost_dominance(self):
+        """Print supplier cost dominance analysis."""
+        print(f"      Average unit costs from each supplier to DCs:")
+        
+        suppliers = self.config.network.suppliers
+        dcs = self.config.network.distribution_centers
+        
+        # Calculate average cost for each supplier
+        supplier_avg_costs = {}
+        for supplier in suppliers:
+            costs_to_dcs = []
+            for dc in dcs:
+                arc = (supplier, dc)
+                if arc in self.config.network.arcs:
+                    costs_to_dcs.append(self.config.network.arcs[arc]['cost'])
+            if costs_to_dcs:
+                supplier_avg_costs[supplier] = np.mean(costs_to_dcs)
+        
+        # Print sorted by cost
+        for supplier in sorted(supplier_avg_costs.keys(), key=lambda s: supplier_avg_costs[s]):
+            avg_cost = supplier_avg_costs[supplier]
+            utilization = self.result.avg_supplier_utilization.get(supplier, 0.0)
+            print(f"         {supplier}: ${avg_cost:.2f}/unit (avg to DCs), {utilization:.1f}% utilized")
+        
+        # Explain dominance based on actual utilization
+        if self.result.avg_supplier_utilization:
+            most_used = max(self.result.avg_supplier_utilization.keys(), 
+                          key=lambda s: self.result.avg_supplier_utilization[s])
+            most_used_util = self.result.avg_supplier_utilization[most_used]
+            
+            if most_used_util > 10:  # Only explain if significantly used
+                print(f"\n      → {most_used} is primary supplier ({most_used_util:.1f}% utilization)")
+                print(f"        Other suppliers serve as resilience backups for disruption scenarios")
+                
+                # Check if costs align with usage
+                if most_used in supplier_avg_costs:
+                    most_used_cost = supplier_avg_costs[most_used]
+                    min_cost = min(supplier_avg_costs.values())
+                    if most_used_cost > min_cost + 0.1:
+                        print(f"        Note: {most_used} is not the cheapest supplier on average, but may have")
+                        print(f"              advantages in specific routing paths or lower disruption exposure")
+    
+    def _print_emergency_economics(self):
+        """Print economic explanation for why emergency procurement is not used."""
+        emerg_cost = self.config.optimization.emergency_procurement_cost
+        unmet_penalty = self.config.optimization.unmet_demand_penalty
+        
+        print(f"\n      Economic Trade-off Analysis:")
+        print(f"         Emergency procurement cost: ${emerg_cost:.2f}/unit")
+        print(f"         Unmet demand penalty: ${unmet_penalty:.2f}/unit")
+        
+        if emerg_cost < unmet_penalty:
+            print(f"         → Emergency is cheaper; model prefers emergency over unmet")
+            print(f"         → No emergency triggered suggests capacity constraints limit emergency sourcing")
+        else:
+            print(f"         → Unmet demand penalty is lower; model rationally prefers small unmet over emergency")
+            print(f"         → This represents a policy choice: accept limited shortfalls rather than expensive emergency supply")
     
     def _print_scenario_statistics(self):
         """Print scenario-level statistics."""

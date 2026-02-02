@@ -78,13 +78,15 @@ class ScenarioGenerator:
         Generate demand for all demand nodes with random variation.
         
         Uses lognormal distribution to ensure positive demands with
-        realistic variation patterns.
+        realistic variation patterns. Applies winsorization to cap
+        extreme tail events for stress-testing realism.
         
         Returns:
             Dictionary mapping demand nodes to demand values
         """
         demand = {}
         cv = self.config.scenario.demand_variability
+        max_sigma = self.config.scenario.max_sigma_deviation
         
         for node, base_demand in self.config.network.base_demand.items():
             # Use lognormal distribution for positive values
@@ -92,7 +94,15 @@ class ScenarioGenerator:
             sigma = np.sqrt(np.log(1 + cv**2))
             mu = np.log(base_demand) - 0.5 * sigma**2
             
-            demand[node] = self.rng.lognormal(mu, sigma)
+            raw_demand = self.rng.lognormal(mu, sigma)
+            
+            # Apply winsorization: cap extreme values at mean + max_sigma * std_dev
+            # For lognormal, approximate std dev = mean * cv
+            std_dev = base_demand * cv
+            max_demand = base_demand + max_sigma * std_dev
+            
+            # Cap the demand to prevent pathological scenarios
+            demand[node] = min(raw_demand, max_demand)
         
         return demand
     

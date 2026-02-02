@@ -69,6 +69,10 @@ class ScenarioConfig:
     disruption_probability: float = 0.4  # Probability of disruption per scenario
     disruption_severity_range: Tuple[float, float] = (0.3, 0.8)  # Range of capacity reduction
     
+    # Demand shock capping (winsorization) - limits extreme tail events
+    # Cap demand at mean + max_sigma_deviation * std_dev
+    max_sigma_deviation: float = 3.5  # Maximum standard deviations from mean (stress-testing level)
+    
     # Random seed for reproducibility
     random_seed: int = 42
 
