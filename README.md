@@ -2,6 +2,33 @@
 
 A complete, production-ready implementation of a two-stage stochastic Mixed-Integer Linear Program (MILP) for optimizing wildfire-resilient supply networks with CVaR (Conditional Value at Risk) and equity considerations.
 
+## 🆕 Latest Improvements (Publication-Ready)
+
+This model has been hardened for academic publication with three critical enhancements:
+
+### 1. Emergency Procurement Diagnostics
+**Comprehensive worst-scenario analysis** proving why emergency procurement is not triggered:
+- Tracks emergency capacity usage vs. available (0.0/2,000 units per supplier)
+- Identifies binding arc constraints that block emergency flow (DC1→D4, DC2→D4)
+- Economic analysis showing emergency is 25× cheaper than unmet, but **downstream capacity constraints** prevent effectiveness
+
+### 2. Cost Scaling Transparency
+**No more hand-waving** about "normalized" costs:
+- Clear mapping: **Model $1 = Real $1,000 CAD**
+- All major costs show both model units AND real CAD (e.g., `$8,607 (Real: $8,607,027 CAD)`)
+- Explicit scaling factors with transparent rationale
+
+### 3. Scenario Generator Credibility
+**Not naive i.i.d. normals** - credible stress-testing methodology:
+- Lognormal distribution (realistic right-skewed demand patterns)
+- Winsorization at 3.5σ (bounded tail prevents pathological scenarios)
+- Hazard-driven disruptions (exposure-weighted, not i.i.d.)
+- 100 scenarios for adequate tail resolution
+
+See [FINAL_IMPROVEMENTS.md](FINAL_IMPROVEMENTS.md) for complete details.
+
+---
+
 ## Overview
 
 This project implements a mathematically rigorous optimization framework for supply network planning under wildfire risk. The model makes strategic preparedness decisions (first stage) and tactical recourse decisions (second stage) to minimize costs while managing risk and ensuring equitable service.
@@ -251,14 +278,14 @@ Expected output:
 The optimization produces:
 
 1. **Console Output**: Real-time progress and comprehensive summary including:
-   - **Model units and scaling** (cost=$1K CAD, quantity=pallets)
-   - Solution status and objective value
+   - **🆕 Model units and scaling** (Model $1 = Real $1,000 CAD, transparent mapping)
+   - Solution status and objective value (both model and real CAD)
    - First-stage decisions (inventory allocation)
    - Risk measures (VaR, CVaR, expected cost) **with tail diagnostics**
    - Equity measures (demand satisfaction rates) with worst-case identification
    - Capacity utilization (suppliers, DCs, transport arcs)
-   - **Binding constraint diagnostics** (which constraints limit the solution)
-   - Emergency procurement statistics
+   - **🆕 Binding constraint diagnostics** (which constraints limit the solution)
+   - **🆕 Emergency procurement diagnostics for worst scenarios**
    - Scenario cost distribution
    
 2. **Detailed Report**: Text file (`results/optimization_report.txt`) with comprehensive results
@@ -268,6 +295,36 @@ The optimization produces:
    - `demand_satisfaction.png`: Satisfaction rates by node
    - `inventory_allocation.png`: Prepositioned inventory
    - `risk_analysis.png`: Comprehensive risk analysis
+
+### Example Output (Publication-Ready)
+
+```
+📏 Model Units and Scaling:
+   Cost: Model $1 = Real $1,000 CAD
+   Distance: Model 1 = Real 100 km
+   Quantity: Model 1 = Real 1 pallets
+
+📊 Solution Status:
+   Total Objective: $8,607.03
+                    (Real CAD: $8,607,026.53)
+
+⚠️  Risk Measures:
+   VaR at 90.0%: $8,989.66 (Real: $8,989,656.71 CAD)
+   CVaR at 90.0%: $9,837.65 (Real: $9,837,654.08 CAD)
+   ✓ CVaR ≥ VaR (mathematically valid)
+
+🚨 Emergency Procurement Diagnostics:
+   Scenario 66:
+      Emergency Procurement Used: 0.0 units
+      ⚠️  Binding Arc Constraints:
+         DC1 → D4: slack = 0.000000
+      → Emergency blocked by downstream capacity
+   
+   Economic Analysis:
+      Emergency: $20.00/unit, Unmet penalty: $500.00/unit
+      → Emergency is 25.0× cheaper than unmet
+      → Capacity constraints limit emergency effectiveness
+```
 
 ## Configuration
 
