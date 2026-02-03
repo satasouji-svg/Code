@@ -127,7 +127,8 @@ class TwoStageStochasticModel:
         # ===== SECOND STAGE VARIABLES (per scenario) =====
         self.variables['flow'] = {}
         self.variables['unmet_demand'] = {}
-        self.variables['emergency_procurement'] = {}
+        self.variables['emergency_procurement'] = {}  # LEGACY: kept for backward compatibility
+        self.variables['emergency_airlift'] = {}  # Q1 FIX: Emergency as direct supplier→demand airlift
         self.variables['leftover_inventory'] = {}  # Q1 fix: leftover inventory
         
         for scenario in self.scenarios:
@@ -151,7 +152,7 @@ class TwoStageStochasticModel:
                     cat='Continuous'
                 )
             
-            # Emergency procurement at each supplier
+            # Emergency procurement at each supplier (LEGACY - kept for backward compat)
             self.variables['emergency_procurement'][s] = {}
             for supplier in net.suppliers:
                 self.variables['emergency_procurement'][s][supplier] = pulp.LpVariable(
@@ -159,6 +160,17 @@ class TwoStageStochasticModel:
                     lowBound=0,
                     cat='Continuous'
                 )
+            
+            # Q1 CRITICAL FIX: Emergency airlift as direct supplier→demand arcs
+            # This is the REAL emergency recourse that can reach demand nodes
+            self.variables['emergency_airlift'][s] = {}
+            for supplier in net.suppliers:
+                for demand_node in net.demand_nodes:
+                    self.variables['emergency_airlift'][s][(supplier, demand_node)] = pulp.LpVariable(
+                        f"emergency_airlift_{supplier}_{demand_node}_s{s}",
+                        lowBound=0,
+                        cat='Continuous'
+                    )
             
             # Q1 fix: Leftover inventory at each DC (inventory not used in this scenario)
             self.variables['leftover_inventory'][s] = {}
@@ -289,46 +301,59 @@ class TwoStageStochasticModel:
                 capacity_factor = scenario.facility_capacity_factors[supplier]
                 effective_capacity = base_capacity * capacity_factor
                 
-                # Total outflow from supplier
-                total_outflow = pulp.lpSum([
+                # Total outflow from supplier (regular flow to DCs)
+                total_regular_outflow = pulp.lpSum([
                     self.variables['flow'][s][(supplier, target)]
                     for target in net.distribution_centers
                     if (supplier, target) in net.arcs
                 ])
                 
-                # Add emergency procurement
-                emergency = self.variables['emergency_procurement'][s][supplier]
+                # Q1 CRITICAL FIX: Total emergency airlift from this supplier
+                total_emergency_airlift = pulp.lpSum([
+                    self.variables['emergency_airlift'][s][(supplier, demand_node)]
+                    for demand_node in net.demand_nodes
+                ])
                 
-                # Capacity constraint (emergency allows exceeding base capacity)
+                # Capacity constraint: regular flow + emergency airlift <= effective capacity
+                # (Emergency no longer "adds" capacity, it uses the same supply capacity)
                 self.model += (
-                    total_outflow <= effective_capacity + emergency,
+                    total_regular_outflow + total_emergency_airlift <= effective_capacity,
                     f"supplier_capacity_{supplier}_s{s}"
                 )
                 
-                # Q1 FIX: Cap emergency procurement to realistic limit
-                # Emergency cannot exceed a fraction of base capacity
-                emergency_cap = base_capacity * opt.emergency_capacity_fraction
+                # Q1 FIX: Cap emergency airlift to realistic limit per supplier
+                # Each supplier has a separate emergency airlift capacity
+                emergency_cap = opt.emergency_airlift_capacity_per_supplier
                 self.model += (
-                    emergency <= emergency_cap,
-                    f"emergency_cap_{supplier}_s{s}"
+                    total_emergency_airlift <= emergency_cap,
+                    f"emergency_airlift_cap_{supplier}_s{s}"
                 )
             
             # === Demand satisfaction constraints ===
             for node in net.demand_nodes:
                 demand = scenario.demand[node]
                 
-                # Total inflow to demand node
-                total_inflow = pulp.lpSum([
+                # Total inflow from DCs (regular routing)
+                total_inflow_from_dcs = pulp.lpSum([
                     self.variables['flow'][s][(source, node)]
                     for source in net.distribution_centers
                     if (source, node) in net.arcs
                 ])
                 
+                # Q1 CRITICAL FIX: Add emergency airlift (direct supplier→demand)
+                # This is the TRUE emergency recourse that can reach demand
+                total_emergency_airlift = pulp.lpSum([
+                    self.variables['emergency_airlift'][s][(supplier, node)]
+                    for supplier in net.suppliers
+                ])
+                
                 # Demand satisfaction with unmet demand
                 unmet = self.variables['unmet_demand'][s][node]
                 
+                # Q1 FIX: inflow_from_dcs + emergency_airlift + unmet = demand
+                # Now emergency can actually reach demand nodes!
                 self.model += (
-                    total_inflow + unmet == demand,
+                    total_inflow_from_dcs + total_emergency_airlift + unmet == demand,
                     f"demand_satisfaction_{node}_s{s}"
                 )
     
@@ -402,8 +427,17 @@ class TwoStageStochasticModel:
             for arc in net.arcs.keys()
         ])
         
-        # Emergency procurement costs
-        emergency_cost = pulp.lpSum([
+        # Q1 CRITICAL FIX: Emergency airlift costs (direct supplier→demand)
+        # These are the REAL emergency costs that can reach demand
+        emergency_airlift_cost = pulp.lpSum([
+            self.variables['emergency_airlift'][scenario_id][(supplier, demand_node)]
+            * opt.emergency_airlift_cost
+            for supplier in net.suppliers
+            for demand_node in net.demand_nodes
+        ])
+        
+        # Legacy emergency procurement costs (kept for backward compatibility, but should be zero)
+        legacy_emergency_cost = pulp.lpSum([
             self.variables['emergency_procurement'][scenario_id][supplier] 
             * opt.emergency_procurement_cost
             for supplier in net.suppliers
@@ -423,7 +457,7 @@ class TwoStageStochasticModel:
             for dc in net.distribution_centers
         ])
         
-        return transport_cost + emergency_cost + penalty_cost + leftover_cost
+        return transport_cost + emergency_airlift_cost + legacy_emergency_cost + penalty_cost + leftover_cost
     
     def _set_objective(self):
         """
@@ -567,12 +601,21 @@ class TwoStageStochasticModel:
                 unmet_val = pulp.value(self.variables['unmet_demand'][s][node])
                 scenario_unmet_demand[s][node] = unmet_val
             
-            # Emergency procurement
+            # Emergency procurement (legacy - should be zero with new airlift model)
             scenario_emergency_procurement[s] = {}
             for supplier in self.config.network.suppliers:
                 proc_val = pulp.value(self.variables['emergency_procurement'][s][supplier])
                 if proc_val > 1e-6:
                     scenario_emergency_procurement[s][supplier] = proc_val
+            
+            # Q1 CRITICAL FIX: Emergency airlift (NEW - real emergency recourse)
+            # Track emergency airlift flows separately
+            for supplier in self.config.network.suppliers:
+                for demand_node in self.config.network.demand_nodes:
+                    airlift_val = pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    if airlift_val > 1e-6:
+                        # Store as special arc in flows (prefixed with "EMERGENCY_")
+                        scenario_flows[s][f"EMERGENCY_{supplier}_{demand_node}"] = airlift_val
             
             # Q1 fix: Leftover inventory
             scenario_leftover_inventory[s] = {}
@@ -581,53 +624,81 @@ class TwoStageStochasticModel:
                 if leftover_val > 1e-6:
                     scenario_leftover_inventory[s][dc] = leftover_val
         
-        # Calculate risk measures with proper probability weighting
-        expected_cost = sum(
-            scenario.probability * scenario_costs[scenario.id]
+        # Q1 FIX: Calculate risk measures from OPTIMIZED VARIABLES (not just empirical)
+        # This is the correct Q1-grade approach
+        
+        # Get optimized VaR variable value
+        var_optimized = pulp.value(self.variables['var'])
+        
+        # Get optimized excess values
+        excess_values = {}
+        for scenario in self.scenarios:
+            s = scenario.id
+            excess_values[s] = pulp.value(self.variables['excess'][s])
+        
+        # Compute optimized CVaR from formula: CVaR = VaR + (1/(1-α)) * E[excess]
+        alpha = self.config.optimization.cvar_alpha
+        expected_excess = sum(
+            scenario.probability * excess_values[scenario.id]
             for scenario in self.scenarios
         )
+        cvar_optimized = var_optimized + (1.0 / (1.0 - alpha)) * expected_excess
         
-        # Compute VaR as probability-weighted α-quantile
+        # ALSO compute empirical VaR/CVaR for validation
         # Sort scenarios by cost
         sorted_scenarios = sorted(self.scenarios, key=lambda s: scenario_costs[s.id])
         cumulative_prob = 0.0
-        alpha = self.config.optimization.cvar_alpha
-        var_scenario_idx = 0
+        var_empirical_idx = 0
         
         for idx, scenario in enumerate(sorted_scenarios):
             cumulative_prob += scenario.probability
             if cumulative_prob >= alpha:
-                var_scenario_idx = idx
+                var_empirical_idx = idx
                 break
         
-        var_value = scenario_costs[sorted_scenarios[var_scenario_idx].id]
+        var_empirical = scenario_costs[sorted_scenarios[var_empirical_idx].id]
         
-        # Compute CVaR as probability-weighted mean of tail
-        # Identify tail scenarios (those with cost >= VaR)
+        # Compute empirical CVaR as probability-weighted mean of tail
         tail_scenarios = []
         tail_probability = 0.0
         tail_weighted_cost = 0.0
         
         for scenario in self.scenarios:
             s_cost = scenario_costs[scenario.id]
-            if s_cost >= var_value - 1e-6:  # Include scenarios at or above VaR
+            if s_cost >= var_empirical - 1e-6:  # Include scenarios at or above VaR
                 tail_scenarios.append(scenario.id)
                 tail_probability += scenario.probability
                 tail_weighted_cost += scenario.probability * s_cost
         
-        # CVaR is the probability-weighted average of tail costs
+        # Empirical CVaR
         if tail_probability > 1e-9:
-            cvar_value = tail_weighted_cost / tail_probability
+            cvar_empirical = tail_weighted_cost / tail_probability
         else:
-            cvar_value = var_value  # Fallback if tail is empty
+            cvar_empirical = var_empirical
         
-        # Verify CVaR >= VaR (mathematical property)
-        if cvar_value < var_value - 1e-6:
-            print(f"⚠️  Warning: CVaR ({cvar_value:.2f}) < VaR ({var_value:.2f}). Using VaR as CVaR.")
-            cvar_value = var_value
+        # Q1 REPORTING: Use optimized values (primary), store empirical for validation
+        var_value = var_optimized
+        cvar_value = cvar_optimized
         
-        # Calculate equity measures
+        # Verify consistency between optimized and empirical (should match within tolerance)
+        var_diff = abs(var_optimized - var_empirical)
+        cvar_diff = abs(cvar_optimized - cvar_empirical)
+        
+        if var_diff > 1.0:  # Warn if difference is significant
+            print(f"⚠️  VaR difference: Optimized=${var_optimized:.2f}, Empirical=${var_empirical:.2f} (diff={var_diff:.2f})")
+        if cvar_diff > 1.0:
+            print(f"⚠️  CVaR difference: Optimized=${cvar_optimized:.2f}, Empirical=${cvar_empirical:.2f} (diff={cvar_diff:.2f})")
+        
+        # Calculate expected cost
+        expected_cost = sum(
+            scenario.probability * scenario_costs[scenario.id]
+            for scenario in self.scenarios
+        )
+        
+        # Q1 FIX: Calculate equity measures with proper tolerance checking
         satisfaction_ratios = []
+        equity_violations = []  # Track actual constraint violations
+        
         for scenario in self.scenarios:
             s = scenario.id
             for node in self.config.network.demand_nodes:
@@ -636,9 +707,31 @@ class TwoStageStochasticModel:
                 if demand > 0:
                     ratio = (demand - unmet) / demand
                     satisfaction_ratios.append(ratio)
+                    
+                    # Q1 FIX: Check equity constraint violation with tolerance
+                    min_required = self.config.optimization.min_demand_satisfaction
+                    # Constraint is: unmet <= (1 - min_required) * demand
+                    # Equivalently: ratio >= min_required
+                    violation = min_required - ratio
+                    if violation > self.config.optimization.equity_tolerance:
+                        equity_violations.append({
+                            'scenario': s,
+                            'node': node,
+                            'ratio': ratio,
+                            'required': min_required,
+                            'violation': violation
+                        })
         
         min_satisfaction_ratio = min(satisfaction_ratios) if satisfaction_ratios else 0.0
         avg_satisfaction_ratio = np.mean(satisfaction_ratios) if satisfaction_ratios else 0.0
+        
+        # Q1 FIX: Report equity violations if any
+        if equity_violations:
+            print(f"\n⚠️  EQUITY CONSTRAINT VIOLATIONS DETECTED:")
+            for v in equity_violations[:5]:  # Show first 5
+                print(f"   Scenario {v['scenario']}, Node {v['node']}: {v['ratio']:.4f} < {v['required']:.4f} (violation={v['violation']:.6f})")
+            if len(equity_violations) > 5:
+                print(f"   ... and {len(equity_violations) - 5} more violations")
         
         # Calculate capacity utilization metrics
         # Supplier utilization
@@ -687,28 +780,50 @@ class TwoStageStochasticModel:
             
             avg_arc_utilization[arc] = (total_usage / total_capacity * 100) if total_capacity > 0 else 0.0
         
-        # Emergency procurement statistics
+        # Q1 FIX: Emergency statistics (now including airlift)
         scenarios_with_emergency = 0
-        total_emergency_procurement = 0.0
+        total_emergency_procurement = 0.0  # Legacy
+        total_emergency_airlift = 0.0  # Q1 FIX: new airlift
         emergency_capacity_usage = {}
         
         for scenario in self.scenarios:
             s = scenario.id
+            
+            # Legacy emergency (should be zero with new model)
             scenario_emergency = sum(scenario_emergency_procurement[s].values())
-            if scenario_emergency > 1e-6:
+            
+            # Q1 FIX: Count emergency airlift flows
+            scenario_airlift = 0.0
+            for supplier in self.config.network.suppliers:
+                for demand_node in self.config.network.demand_nodes:
+                    airlift_val = pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    if airlift_val > 1e-6:
+                        scenario_airlift += airlift_val
+            
+            # Count scenario as having emergency if either is used
+            if scenario_emergency > 1e-6 or scenario_airlift > 1e-6:
                 scenarios_with_emergency += 1
                 total_emergency_procurement += scenario_emergency * scenario.probability
+                total_emergency_airlift += scenario_airlift * scenario.probability
             
             # Track emergency capacity usage per supplier per scenario
             emergency_capacity_usage[s] = {}
             for supplier in self.config.network.suppliers:
                 emergency_used = scenario_emergency_procurement[s].get(supplier, 0.0)
+                
+                # Q1 FIX: Add airlift to emergency usage
+                supplier_airlift = sum(
+                    pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    for demand_node in self.config.network.demand_nodes
+                )
+                total_emergency_used = emergency_used + supplier_airlift
+                
                 supplier_capacity = self.config.network.facilities[supplier]['capacity']
                 capacity_factor = scenario.facility_capacity_factors[supplier]
                 effective_capacity = supplier_capacity * capacity_factor
                 
                 if effective_capacity > 1e-6:
-                    usage_pct = (emergency_used / effective_capacity) * 100
+                    usage_pct = (total_emergency_used / effective_capacity) * 100
                     emergency_capacity_usage[s][supplier] = usage_pct
                 else:
                     emergency_capacity_usage[s][supplier] = 0.0

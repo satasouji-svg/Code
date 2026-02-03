@@ -126,16 +126,23 @@ class OptimizationConfig:
     inventory_holding_cost: float = 1.5  # Cost per unit of prepositioned inventory
     
     # Second stage costs (recourse)
-    emergency_procurement_cost: float = 20.0  # Cost per unit of emergency procurement
+    emergency_procurement_cost: float = 20.0  # Cost per unit of emergency procurement (LEGACY - not used with airlift)
+    
+    # Q1 CRITICAL FIX: Emergency as airlift/direct shipping
+    # Emergency is now modeled as direct supplier→demand arcs (airlift)
+    emergency_airlift_cost: float = 50.0  # Cost per unit for emergency airlift (higher than regular transport)
+    emergency_airlift_capacity_per_supplier: float = 500.0  # Max emergency capacity per supplier
+    emergency_arc_reliability: float = 0.95  # Emergency arcs have high reliability (minimal disruption)
     
     # Emergency procurement limits (Q1 fix: add explicit caps)
     # Emergency capacity as fraction of base supplier capacity
-    emergency_capacity_fraction: float = 0.5  # Emergency can provide up to 50% of base capacity
+    emergency_capacity_fraction: float = 0.5  # Emergency can provide up to 50% of base capacity (LEGACY)
     leftover_disposal_cost: float = 0.5  # Cost per unit of leftover inventory (optional penalty)
     
     # Numerical stability parameters
     big_m: float = 1e6  # Big-M value for logical constraints
     tolerance: float = 1e-6  # Numerical tolerance for constraint violations
+    equity_tolerance: float = 1e-6  # Tolerance for equity constraint satisfaction checks
     
     # Solver parameters (tightened for paper-quality results)
     solver_time_limit: int = 300  # Maximum solver time in seconds
