@@ -33,7 +33,9 @@ def sensitivity_analysis_cvar_weight():
         
         # Create configuration
         config = Config()
-        config.scenario.n_scenarios = 10
+        # PERFORMANCE FIX: Use at least 50 scenarios for reliable CVaR with α=0.90
+        # With α=0.90, tail = 10% of scenarios. Need 50+ for stable tail representation.
+        config.scenario.n_scenarios = 50
         config.optimization.cvar_weight = weight
         config.optimization.expectation_weight = 1.0 - weight
         
@@ -107,7 +109,8 @@ def sensitivity_analysis_equity():
         
         # Create configuration
         config = Config()
-        config.scenario.n_scenarios = 10
+        # PERFORMANCE FIX: Use at least 50 scenarios for reliable CVaR with α=0.90
+        config.scenario.n_scenarios = 50
         config.optimization.min_demand_satisfaction = min_sat
         
         # Generate scenarios (use same seed for fair comparison)
@@ -187,7 +190,8 @@ def compare_risk_strategies():
         
         # Create configuration
         config = Config()
-        config.scenario.n_scenarios = 15
+        # PERFORMANCE FIX: Use at least 50 scenarios for reliable CVaR with α=0.90
+        config.scenario.n_scenarios = 50
         config.optimization.cvar_weight = cvar_weight
         config.optimization.expectation_weight = 1.0 - cvar_weight
         

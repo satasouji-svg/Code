@@ -144,9 +144,11 @@ class OptimizationConfig:
     tolerance: float = 1e-6  # Numerical tolerance for constraint violations
     equity_tolerance: float = 1e-6  # Tolerance for equity constraint satisfaction checks
     
-    # Solver parameters (tightened for paper-quality results)
+    # Solver parameters (PERFORMANCE FIX: practical gap for stable, reliable solutions)
     solver_time_limit: int = 300  # Maximum solver time in seconds
-    solver_gap: float = 1e-6  # MIP gap tolerance (near-zero for true optimality)
+    solver_gap: float = 1e-4  # MIP gap tolerance (practical balance of quality and speed)
+    # Note: 1e-6 gap causes CBC to grind on tiny improvements and creates instability
+    # Use 1e-3 for pilot runs, 1e-4 for production, 1e-5 only if truly needed
     
     def validate(self):
         """Validate configuration parameters."""
