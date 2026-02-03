@@ -1,0 +1,939 @@
+"""
+Two-stage stochastic MILP model for wildfire-resilient supply network optimization.
+
+This module implements a mathematically rigorous two-stage stochastic program with:
+- First stage: Preparedness decisions (inventory prepositioning)
+- Second stage: Recourse decisions (procurement, routing under scenarios)
+- CVaR (Conditional Value at Risk) for risk-averse optimization
+- Equity constraints for fair demand satisfaction
+"""
+
+import pulp
+import numpy as np
+from typing import Dict, List, Tuple, Optional
+from dataclasses import dataclass
+from config import Config
+from scenario_generator import Scenario
+
+
+@dataclass
+class OptimizationResult:
+    """Container for optimization results."""
+    
+    status: str
+    objective_value: float
+    solve_time: float
+    
+    # First stage decisions
+    prepositioned_inventory: Dict[str, float]
+    
+    # Second stage decisions (per scenario)
+    scenario_costs: Dict[int, float]
+    scenario_flows: Dict[int, Dict[Tuple[str, str], float]]
+    scenario_unmet_demand: Dict[int, Dict[str, float]]
+    scenario_emergency_procurement: Dict[int, Dict[str, float]]
+    
+    # Risk measures
+    expected_cost: float
+    cvar_value: float
+    var_value: float
+    
+    # Equity measures
+    min_satisfaction_ratio: float
+    avg_satisfaction_ratio: float
+    
+    # Q1 fix: leftover inventory (with default)
+    scenario_leftover_inventory: Dict[int, Dict[str, float]] = None  
+    
+    # Risk measure diagnostics (for auditability) - with defaults
+    tail_scenarios: List[int] = None  # Scenario IDs in CVaR tail
+    tail_probability: float = 0.0     # Total probability mass in tail
+    
+    # Capacity utilization metrics - with defaults
+    avg_supplier_utilization: Dict[str, float] = None
+    avg_dc_utilization: Dict[str, float] = None
+    avg_arc_utilization: Dict[Tuple[str, str], float] = None
+    scenarios_with_emergency: int = 0
+    total_emergency_procurement: float = 0.0
+    
+    # Binding constraint diagnostics - with defaults
+    tight_supplier_constraints: List[Tuple[str, int, float]] = None  # (supplier, scenario, slack)
+    tight_dc_constraints: List[Tuple[str, float]] = None              # (dc, slack)
+    tight_arc_constraints: List[Tuple[Tuple[str, str], int, float]] = None  # (arc, scenario, slack)
+    emergency_capacity_usage: Dict[int, Dict[str, float]] = None      # scenario -> supplier -> usage %
+
+
+class TwoStageStochasticModel:
+    """Two-stage stochastic MILP model builder and solver."""
+    
+    def __init__(self, config: Config, scenarios: List[Scenario]):
+        """
+        Initialize the optimization model.
+        
+        Args:
+            config: Configuration object with all parameters
+            scenarios: List of scenarios for stochastic optimization
+        """
+        self.config = config
+        self.scenarios = scenarios
+        self.model: Optional[pulp.LpProblem] = None
+        self.variables = {}
+        
+    def build_model(self):
+        """
+        Build the complete two-stage stochastic MILP model.
+        
+        This creates all variables, constraints, and the objective function
+        with proper CVaR formulation and equity considerations.
+        """
+        print("🔨 Building optimization model...")
+        
+        # Initialize model
+        self.model = pulp.LpProblem("Wildfire_Resilient_Supply_Network", pulp.LpMinimize)
+        
+        # Build decision variables
+        self._create_variables()
+        
+        # Add constraints
+        self._add_first_stage_constraints()
+        self._add_second_stage_constraints()
+        self._add_cvar_constraints()
+        self._add_equity_constraints()
+        
+        # Set objective function
+        self._set_objective()
+        
+        print("✅ Model built successfully")
+        print(f"   Variables: {len(self.model.variables())}")
+        print(f"   Constraints: {len(self.model.constraints)}")
+    
+    def _create_variables(self):
+        """Create all decision variables for the model."""
+        net = self.config.network
+        opt = self.config.optimization
+        
+        # ===== FIRST STAGE VARIABLES =====
+        
+        # Q1 CRITICAL FIX: Prepositioning shipments from suppliers to DCs
+        # This fixes the "free inventory" problem - inventory must be procured
+        self.variables['prep_ship'] = {}
+        for supplier in net.suppliers:
+            for dc in net.distribution_centers:
+                arc = (supplier, dc)
+                # Check if arc exists
+                if arc in net.arcs:
+                    arc_capacity = net.arcs[arc].get('capacity', float('inf'))
+                    self.variables['prep_ship'][arc] = pulp.LpVariable(
+                        f"prep_ship_{supplier}_{dc}",
+                        lowBound=0,
+                        upBound=arc_capacity,
+                        cat='Continuous'
+                    )
+        
+        # Prepositioned inventory at each distribution center
+        # Q1 FIX: Now constrained by prepositioning shipments (not free)
+        self.variables['inventory'] = {}
+        for dc in net.distribution_centers:
+            storage_cap = net.facilities[dc].get('storage_capacity', float('inf'))
+            self.variables['inventory'][dc] = pulp.LpVariable(
+                f"inventory_{dc}",
+                lowBound=0,
+                upBound=storage_cap,
+                cat='Continuous'
+            )
+        
+        # ===== SECOND STAGE VARIABLES (per scenario) =====
+        self.variables['flow'] = {}
+        self.variables['unmet_demand'] = {}
+        # REMOVED: legacy emergency_procurement (replaced by emergency_airlift)
+        self.variables['emergency_airlift'] = {}  # Q1 FIX: Emergency as direct supplier→demand airlift
+        self.variables['leftover_inventory'] = {}  # Q1 fix: leftover inventory
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            
+            # Flow on each arc
+            self.variables['flow'][s] = {}
+            for arc in net.arcs.keys():
+                self.variables['flow'][s][arc] = pulp.LpVariable(
+                    f"flow_{arc[0]}_{arc[1]}_s{s}",
+                    lowBound=0,
+                    cat='Continuous'
+                )
+            
+            # Unmet demand at each demand node
+            self.variables['unmet_demand'][s] = {}
+            for node in net.demand_nodes:
+                self.variables['unmet_demand'][s][node] = pulp.LpVariable(
+                    f"unmet_demand_{node}_s{s}",
+                    lowBound=0,
+                    cat='Continuous'
+                )
+            
+            # Q1 CRITICAL FIX: Emergency airlift as direct supplier→demand arcs
+            # This is the REAL emergency recourse that can reach demand nodes
+            self.variables['emergency_airlift'][s] = {}
+            for supplier in net.suppliers:
+                for demand_node in net.demand_nodes:
+                    self.variables['emergency_airlift'][s][(supplier, demand_node)] = pulp.LpVariable(
+                        f"emergency_airlift_{supplier}_{demand_node}_s{s}",
+                        lowBound=0,
+                        cat='Continuous'
+                    )
+            
+            # Q1 fix: Leftover inventory at each DC (inventory not used in this scenario)
+            self.variables['leftover_inventory'][s] = {}
+            for dc in net.distribution_centers:
+                self.variables['leftover_inventory'][s][dc] = pulp.LpVariable(
+                    f"leftover_inv_{dc}_s{s}",
+                    lowBound=0,
+                    cat='Continuous'
+                )
+        
+        # ===== CVaR VARIABLES =====
+        # VaR (Value at Risk) - threshold for CVaR calculation
+        self.variables['var'] = pulp.LpVariable(
+            "VaR",
+            lowBound=None,
+            cat='Continuous'
+        )
+        
+        # Excess cost above VaR for each scenario (for CVaR calculation)
+        self.variables['excess'] = {}
+        for scenario in self.scenarios:
+            s = scenario.id
+            self.variables['excess'][s] = pulp.LpVariable(
+                f"excess_s{s}",
+                lowBound=0,
+                cat='Continuous'
+            )
+    
+    def _add_first_stage_constraints(self):
+        """Add first stage constraints for preparedness decisions."""
+        net = self.config.network
+        
+        # Q1 CRITICAL FIX: Inventory sourcing constraint
+        # Inventory must be procured from suppliers (not free/magic)
+        for dc in net.distribution_centers:
+            # Sum of prepositioning shipments to this DC
+            total_prep_ship = pulp.lpSum([
+                self.variables['prep_ship'][(supplier, dc)]
+                for supplier in net.suppliers
+                if (supplier, dc) in self.variables['prep_ship']
+            ])
+            
+            # Inventory cannot exceed what was shipped
+            self.model += (
+                self.variables['inventory'][dc] <= total_prep_ship,
+                f"inventory_sourcing_{dc}"
+            )
+        
+        # Q1 CRITICAL FIX: Supplier capacity for prepositioning
+        # Prepositioning shipments limited by supplier capacity
+        for supplier in net.suppliers:
+            total_prep_from_supplier = pulp.lpSum([
+                self.variables['prep_ship'][(supplier, dc)]
+                for dc in net.distribution_centers
+                if (supplier, dc) in self.variables['prep_ship']
+            ])
+            
+            # Cannot exceed supplier's base capacity
+            supplier_capacity = net.facilities[supplier].get('capacity', float('inf'))
+            self.model += (
+                total_prep_from_supplier <= supplier_capacity,
+                f"prep_supplier_capacity_{supplier}"
+            )
+    
+    def _add_second_stage_constraints(self):
+        """Add second stage constraints for recourse decisions."""
+        net = self.config.network
+        opt = self.config.optimization
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            
+            # === Flow conservation at distribution centers ===
+            # Q1 fix: Allow leftover inventory instead of forcing full usage
+            for dc in net.distribution_centers:
+                # Inflow from suppliers
+                inflow = pulp.lpSum([
+                    self.variables['flow'][s][(source, dc)]
+                    for source in net.suppliers
+                    if (source, dc) in net.arcs
+                ])
+                
+                # Outflow to demand nodes
+                outflow = pulp.lpSum([
+                    self.variables['flow'][s][(dc, target)]
+                    for target in net.demand_nodes
+                    if (dc, target) in net.arcs
+                ])
+                
+                # Add prepositioned inventory
+                inventory = self.variables['inventory'][dc]
+                
+                # Leftover inventory (what's not shipped out)
+                leftover = self.variables['leftover_inventory'][s][dc]
+                
+                # Q1 FIX: Conservation now allows leftover
+                # inflow + inventory = outflow + leftover
+                # (Previously was: inflow + inventory = outflow, forcing full usage)
+                self.model += (
+                    inflow + inventory == outflow + leftover,
+                    f"flow_conservation_{dc}_s{s}"
+                )
+            
+            # === Q1 FIX: DC throughput constraints (apply facility disruption factors) ===
+            # Previously, DC disruptions were generated but not applied to operations
+            for dc in net.distribution_centers:
+                # Get DC disruption factor
+                capacity_factor = scenario.facility_capacity_factors[dc]
+                storage_cap = net.facilities[dc]['storage_capacity']
+                
+                # Apply disruption to throughput capacity
+                # Total outflow from DC cannot exceed disrupted storage capacity
+                total_outflow = pulp.lpSum([
+                    self.variables['flow'][s][(dc, target)]
+                    for target in net.demand_nodes
+                    if (dc, target) in net.arcs
+                ])
+                
+                effective_throughput = storage_cap * capacity_factor
+                
+                # Only add constraint if capacity is non-negligible
+                if effective_throughput > opt.tolerance:
+                    self.model += (
+                        total_outflow <= effective_throughput,
+                        f"dc_throughput_{dc}_s{s}"
+                    )
+                else:
+                    # DC is severely disrupted - force minimal throughput
+                    self.model += (
+                        total_outflow <= opt.tolerance,
+                        f"dc_disrupted_{dc}_s{s}"
+                    )
+            
+            # === Capacity constraints on arcs ===
+            for arc, arc_data in net.arcs.items():
+                base_capacity = arc_data['capacity']
+                capacity_factor = scenario.arc_capacity_factors[arc]
+                effective_capacity = base_capacity * capacity_factor
+                
+                # Only add constraint if effective capacity is non-negligible
+                if effective_capacity > opt.tolerance:
+                    self.model += (
+                        self.variables['flow'][s][arc] <= effective_capacity,
+                        f"arc_capacity_{arc[0]}_{arc[1]}_s{s}"
+                    )
+                else:
+                    # Force flow to zero for disrupted arcs
+                    self.model += (
+                        self.variables['flow'][s][arc] == 0,
+                        f"arc_disrupted_{arc[0]}_{arc[1]}_s{s}"
+                    )
+            
+            # === Supply constraints at suppliers ===
+            for supplier in net.suppliers:
+                base_capacity = net.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = base_capacity * capacity_factor
+                
+                # Total outflow from supplier (regular flow to DCs)
+                total_regular_outflow = pulp.lpSum([
+                    self.variables['flow'][s][(supplier, target)]
+                    for target in net.distribution_centers
+                    if (supplier, target) in net.arcs
+                ])
+                
+                # Q1 CRITICAL FIX: Total emergency airlift from this supplier
+                total_emergency_airlift = pulp.lpSum([
+                    self.variables['emergency_airlift'][s][(supplier, demand_node)]
+                    for demand_node in net.demand_nodes
+                ])
+                
+                # Capacity constraint: regular flow + emergency airlift <= effective capacity
+                # (Emergency no longer "adds" capacity, it uses the same supply capacity)
+                self.model += (
+                    total_regular_outflow + total_emergency_airlift <= effective_capacity,
+                    f"supplier_capacity_{supplier}_s{s}"
+                )
+                
+                # Q1 FIX: Cap emergency airlift to realistic limit per supplier
+                # Each supplier has a separate emergency airlift capacity
+                emergency_cap = opt.emergency_airlift_capacity_per_supplier
+                self.model += (
+                    total_emergency_airlift <= emergency_cap,
+                    f"emergency_airlift_cap_{supplier}_s{s}"
+                )
+            
+            # === Demand satisfaction constraints ===
+            for node in net.demand_nodes:
+                demand = scenario.demand[node]
+                
+                # Total inflow from DCs (regular routing)
+                total_inflow_from_dcs = pulp.lpSum([
+                    self.variables['flow'][s][(source, node)]
+                    for source in net.distribution_centers
+                    if (source, node) in net.arcs
+                ])
+                
+                # Q1 CRITICAL FIX: Add emergency airlift (direct supplier→demand)
+                # This is the TRUE emergency recourse that can reach demand
+                total_emergency_airlift = pulp.lpSum([
+                    self.variables['emergency_airlift'][s][(supplier, node)]
+                    for supplier in net.suppliers
+                ])
+                
+                # Demand satisfaction with unmet demand
+                unmet = self.variables['unmet_demand'][s][node]
+                
+                # Q1 FIX: inflow_from_dcs + emergency_airlift + unmet = demand
+                # Now emergency can actually reach demand nodes!
+                self.model += (
+                    total_inflow_from_dcs + total_emergency_airlift + unmet == demand,
+                    f"demand_satisfaction_{node}_s{s}"
+                )
+    
+    def _add_cvar_constraints(self):
+        """
+        Add CVaR (Conditional Value at Risk) constraints.
+        
+        CVaR is calculated using the auxiliary variable approach:
+        CVaR_α = VaR_α + (1/(1-α)) * E[max(Cost - VaR_α, 0)]
+        """
+        alpha = self.config.optimization.cvar_alpha
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            prob = scenario.probability
+            
+            # Calculate scenario cost
+            scenario_cost = self._get_scenario_cost_expression(s)
+            
+            # Excess cost above VaR
+            # excess[s] >= scenario_cost - VaR
+            # excess[s] >= 0 (already enforced by variable bounds)
+            self.model += (
+                self.variables['excess'][s] >= scenario_cost - self.variables['var'],
+                f"cvar_excess_s{s}"
+            )
+    
+    def _add_equity_constraints(self):
+        """
+        Add equity constraints to ensure fair demand satisfaction.
+        
+        Each demand node must satisfy at least a minimum fraction of its demand
+        across scenarios (on average or per scenario).
+        """
+        net = self.config.network
+        min_satisfaction = self.config.optimization.min_demand_satisfaction
+        
+        # Per-scenario equity constraints
+        for scenario in self.scenarios:
+            s = scenario.id
+            
+            for node in net.demand_nodes:
+                demand = scenario.demand[node]
+                unmet = self.variables['unmet_demand'][s][node]
+                
+                # Ensure at least min_satisfaction fraction is met
+                # (demand - unmet) / demand >= min_satisfaction
+                # demand - unmet >= min_satisfaction * demand
+                # unmet <= (1 - min_satisfaction) * demand
+                self.model += (
+                    unmet <= (1 - min_satisfaction) * demand,
+                    f"equity_{node}_s{s}"
+                )
+    
+    def _get_scenario_cost_expression(self, scenario_id: int):
+        """
+        Get the total cost expression for a given scenario.
+        
+        Args:
+            scenario_id: Scenario ID
+            
+        Returns:
+            PuLP expression for total scenario cost
+        """
+        net = self.config.network
+        opt = self.config.optimization
+        
+        # Transportation costs
+        transport_cost = pulp.lpSum([
+            self.variables['flow'][scenario_id][arc] * net.arcs[arc]['cost']
+            for arc in net.arcs.keys()
+        ])
+        
+        # Q1 CRITICAL FIX: Emergency airlift costs (direct supplier→demand)
+        # This is the REAL emergency that can reach demand nodes
+        emergency_airlift_cost = pulp.lpSum([
+            self.variables['emergency_airlift'][scenario_id][(supplier, demand_node)]
+            * opt.emergency_airlift_cost
+            for supplier in net.suppliers
+            for demand_node in net.demand_nodes
+        ])
+        
+        # Unmet demand penalties
+        penalty_cost = pulp.lpSum([
+            self.variables['unmet_demand'][scenario_id][node] 
+            * opt.unmet_demand_penalty
+            for node in net.demand_nodes
+        ])
+        
+        # Q1 FIX: Leftover inventory disposal/holding costs
+        leftover_cost = pulp.lpSum([
+            self.variables['leftover_inventory'][scenario_id][dc]
+            * opt.leftover_disposal_cost
+            for dc in net.distribution_centers
+        ])
+        
+        return transport_cost + emergency_airlift_cost + penalty_cost + leftover_cost
+    
+    def _set_objective(self):
+        """
+        Set the objective function.
+        
+        Objective = First-stage costs + CVaR-adjusted second-stage costs
+        where CVaR-adjusted cost = w1 * E[Q] + w2 * CVaR_α[Q]
+        """
+        net = self.config.network
+        opt = self.config.optimization
+        
+        # ===== FIRST STAGE COSTS =====
+        # Q1 CRITICAL FIX: Realistic prepositioning costs
+        # Previously: Only holding cost (~$0.50) - inventory was "free"
+        # Now: procurement + transport + holding
+        
+        # Prepositioning procurement and transport costs
+        prepositioning_cost = pulp.lpSum([
+            self.variables['prep_ship'][(supplier, dc)] * (
+                net.facilities[supplier].get('preposition_cost', 2.0) +  # Procurement cost
+                net.arcs[(supplier, dc)]['cost']  # Transport cost (use 'cost', not 'transport_cost')
+            )
+            for supplier in net.suppliers
+            for dc in net.distribution_centers
+            if (supplier, dc) in self.variables['prep_ship']
+        ])
+        
+        # Inventory holding costs
+        holding_cost = pulp.lpSum([
+            self.variables['inventory'][dc] * net.facilities[dc]['holding_cost']
+            for dc in net.distribution_centers
+        ])
+        
+        first_stage_cost = prepositioning_cost + holding_cost
+        
+        # ===== SECOND STAGE COSTS =====
+        # Expected cost E[Q]
+        expected_cost = pulp.lpSum([
+            scenario.probability * self._get_scenario_cost_expression(scenario.id)
+            for scenario in self.scenarios
+        ])
+        
+        # CVaR calculation
+        # CVaR_α = VaR + (1/(1-α)) * E[excess]
+        alpha = opt.cvar_alpha
+        expected_excess = pulp.lpSum([
+            scenario.probability * self.variables['excess'][scenario.id]
+            for scenario in self.scenarios
+        ])
+        
+        cvar = self.variables['var'] + (1.0 / (1.0 - alpha)) * expected_excess
+        
+        # ===== COMBINED OBJECTIVE =====
+        # Weighted combination of expected cost and CVaR
+        w_exp = opt.expectation_weight
+        w_cvar = opt.cvar_weight
+        
+        risk_adjusted_cost = w_exp * expected_cost + w_cvar * cvar
+        
+        total_objective = first_stage_cost + risk_adjusted_cost
+        
+        self.model += total_objective
+    
+    def solve(self) -> OptimizationResult:
+        """
+        Solve the optimization model.
+        
+        Returns:
+            OptimizationResult object with solution details
+        """
+        if self.model is None:
+            raise ValueError("Model not built. Call build_model() first.")
+        
+        print("🚀 Solving optimization model...")
+        
+        # Configure solver
+        solver = pulp.PULP_CBC_CMD(
+            timeLimit=self.config.optimization.solver_time_limit,
+            gapRel=self.config.optimization.solver_gap,
+            msg=1
+        )
+        
+        # Solve
+        import time
+        start_time = time.time()
+        status = self.model.solve(solver)
+        solve_time = time.time() - start_time
+        
+        # Extract results
+        result = self._extract_results(status, solve_time)
+        
+        print(f"✅ Optimization completed in {solve_time:.2f}s")
+        print(f"   Status: {result.status}")
+        print(f"   Objective value: ${result.objective_value:,.2f}")
+        
+        return result
+    
+    def _extract_results(self, status: int, solve_time: float) -> OptimizationResult:
+        """Extract results from solved model."""
+        status_map = {
+            pulp.LpStatusOptimal: "Optimal",
+            pulp.LpStatusNotSolved: "Not Solved",
+            pulp.LpStatusInfeasible: "Infeasible",
+            pulp.LpStatusUnbounded: "Unbounded",
+            pulp.LpStatusUndefined: "Undefined",
+        }
+        
+        status_str = status_map.get(status, "Unknown")
+        
+        if status != pulp.LpStatusOptimal:
+            # Return empty result for non-optimal solutions
+            return OptimizationResult(
+                status=status_str,
+                objective_value=float('inf'),
+                solve_time=solve_time,
+                prepositioned_inventory={},
+                scenario_costs={},
+                scenario_flows={},
+                scenario_unmet_demand={},
+                scenario_emergency_procurement={},
+                expected_cost=float('inf'),
+                cvar_value=float('inf'),
+                var_value=float('inf'),
+                min_satisfaction_ratio=0.0,
+                avg_satisfaction_ratio=0.0
+            )
+        
+        # Extract first stage decisions
+        prepositioned_inventory = {}
+        for dc in self.config.network.distribution_centers:
+            prepositioned_inventory[dc] = pulp.value(self.variables['inventory'][dc])
+        
+        # Extract second stage decisions
+        scenario_costs = {}
+        scenario_flows = {}
+        scenario_unmet_demand = {}
+        # REMOVED: scenario_emergency_procurement (now using airlift in flows)
+        scenario_leftover_inventory = {}  # Q1 fix: track leftover
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            
+            # Scenario cost
+            scenario_costs[s] = pulp.value(
+                self._get_scenario_cost_expression(s)
+            )
+            
+            # Flows
+            scenario_flows[s] = {}
+            for arc in self.config.network.arcs.keys():
+                flow_val = pulp.value(self.variables['flow'][s][arc])
+                if flow_val > 1e-6:  # Only store non-zero flows
+                    scenario_flows[s][arc] = flow_val
+            
+            # Unmet demand
+            scenario_unmet_demand[s] = {}
+            for node in self.config.network.demand_nodes:
+                unmet_val = pulp.value(self.variables['unmet_demand'][s][node])
+                scenario_unmet_demand[s][node] = unmet_val
+            
+            # Q1 CRITICAL FIX: Emergency airlift (real emergency recourse)
+            # Track emergency airlift flows separately
+            for supplier in self.config.network.suppliers:
+                for demand_node in self.config.network.demand_nodes:
+                    airlift_val = pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    if airlift_val > 1e-6:
+                        # Store as special arc in flows (prefixed with "EMERGENCY_")
+                        scenario_flows[s][f"EMERGENCY_{supplier}_{demand_node}"] = airlift_val
+            
+            # Q1 fix: Leftover inventory
+            scenario_leftover_inventory[s] = {}
+            for dc in self.config.network.distribution_centers:
+                leftover_val = pulp.value(self.variables['leftover_inventory'][s][dc])
+                if leftover_val > 1e-6:
+                    scenario_leftover_inventory[s][dc] = leftover_val
+        
+        # Q1 FIX: Calculate risk measures from OPTIMIZED VARIABLES (not just empirical)
+        # This is the correct Q1-grade approach
+        
+        # Get optimized VaR variable value
+        var_optimized = pulp.value(self.variables['var'])
+        
+        # Get optimized excess values
+        excess_values = {}
+        for scenario in self.scenarios:
+            s = scenario.id
+            excess_values[s] = pulp.value(self.variables['excess'][s])
+        
+        # Compute optimized CVaR from formula: CVaR = VaR + (1/(1-α)) * E[excess]
+        alpha = self.config.optimization.cvar_alpha
+        expected_excess = sum(
+            scenario.probability * excess_values[scenario.id]
+            for scenario in self.scenarios
+        )
+        cvar_optimized = var_optimized + (1.0 / (1.0 - alpha)) * expected_excess
+        
+        # ALSO compute empirical VaR/CVaR for validation
+        # Sort scenarios by cost
+        sorted_scenarios = sorted(self.scenarios, key=lambda s: scenario_costs[s.id])
+        cumulative_prob = 0.0
+        var_empirical_idx = 0
+        
+        for idx, scenario in enumerate(sorted_scenarios):
+            cumulative_prob += scenario.probability
+            if cumulative_prob >= alpha:
+                var_empirical_idx = idx
+                break
+        
+        var_empirical = scenario_costs[sorted_scenarios[var_empirical_idx].id]
+        
+        # Compute empirical CVaR as probability-weighted mean of tail
+        tail_scenarios = []
+        tail_probability = 0.0
+        tail_weighted_cost = 0.0
+        
+        for scenario in self.scenarios:
+            s_cost = scenario_costs[scenario.id]
+            if s_cost >= var_empirical - 1e-6:  # Include scenarios at or above VaR
+                tail_scenarios.append(scenario.id)
+                tail_probability += scenario.probability
+                tail_weighted_cost += scenario.probability * s_cost
+        
+        # Empirical CVaR
+        if tail_probability > 1e-9:
+            cvar_empirical = tail_weighted_cost / tail_probability
+        else:
+            cvar_empirical = var_empirical
+        
+        # Q1 REPORTING: Use optimized values (primary), store empirical for validation
+        var_value = var_optimized
+        cvar_value = cvar_optimized
+        
+        # Verify consistency between optimized and empirical (should match within tolerance)
+        var_diff = abs(var_optimized - var_empirical)
+        cvar_diff = abs(cvar_optimized - cvar_empirical)
+        
+        if var_diff > 1.0:  # Warn if difference is significant
+            print(f"⚠️  VaR difference: Optimized=${var_optimized:.2f}, Empirical=${var_empirical:.2f} (diff={var_diff:.2f})")
+        if cvar_diff > 1.0:
+            print(f"⚠️  CVaR difference: Optimized=${cvar_optimized:.2f}, Empirical=${cvar_empirical:.2f} (diff={cvar_diff:.2f})")
+        
+        # Calculate expected cost
+        expected_cost = sum(
+            scenario.probability * scenario_costs[scenario.id]
+            for scenario in self.scenarios
+        )
+        
+        # Q1 FIX: Calculate equity measures with proper tolerance checking
+        satisfaction_ratios = []
+        equity_violations = []  # Track actual constraint violations
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            for node in self.config.network.demand_nodes:
+                demand = scenario.demand[node]
+                unmet = scenario_unmet_demand[s][node]
+                if demand > 0:
+                    ratio = (demand - unmet) / demand
+                    satisfaction_ratios.append(ratio)
+                    
+                    # Q1 FIX: Check equity constraint violation with tolerance
+                    min_required = self.config.optimization.min_demand_satisfaction
+                    # Constraint is: unmet <= (1 - min_required) * demand
+                    # Equivalently: ratio >= min_required
+                    violation = min_required - ratio
+                    if violation > self.config.optimization.equity_tolerance:
+                        equity_violations.append({
+                            'scenario': s,
+                            'node': node,
+                            'ratio': ratio,
+                            'required': min_required,
+                            'violation': violation
+                        })
+        
+        min_satisfaction_ratio = min(satisfaction_ratios) if satisfaction_ratios else 0.0
+        avg_satisfaction_ratio = np.mean(satisfaction_ratios) if satisfaction_ratios else 0.0
+        
+        # Q1 FIX: Report equity violations if any
+        if equity_violations:
+            print(f"\n⚠️  EQUITY CONSTRAINT VIOLATIONS DETECTED:")
+            for v in equity_violations[:5]:  # Show first 5
+                print(f"   Scenario {v['scenario']}, Node {v['node']}: {v['ratio']:.4f} < {v['required']:.4f} (violation={v['violation']:.6f})")
+            if len(equity_violations) > 5:
+                print(f"   ... and {len(equity_violations) - 5} more violations")
+        
+        # Calculate capacity utilization metrics
+        # Supplier utilization
+        avg_supplier_utilization = {}
+        for supplier in self.config.network.suppliers:
+            total_usage = 0.0
+            total_capacity = 0.0
+            for scenario in self.scenarios:
+                s = scenario.id
+                # Sum outgoing flows from supplier
+                supplier_flow = sum(
+                    scenario_flows[s].get((supplier, target), 0.0)
+                    for target in self.config.network.distribution_centers
+                    if (supplier, target) in self.config.network.arcs
+                )
+                base_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = base_capacity * capacity_factor
+                
+                total_usage += supplier_flow * scenario.probability
+                total_capacity += effective_capacity * scenario.probability
+            
+            avg_supplier_utilization[supplier] = (total_usage / total_capacity * 100) if total_capacity > 0 else 0.0
+        
+        # DC utilization
+        avg_dc_utilization = {}
+        for dc in self.config.network.distribution_centers:
+            storage_cap = self.config.network.facilities[dc]['storage_capacity']
+            inventory = prepositioned_inventory[dc]
+            avg_dc_utilization[dc] = (inventory / storage_cap * 100) if storage_cap > 0 else 0.0
+        
+        # Arc utilization
+        avg_arc_utilization = {}
+        for arc in self.config.network.arcs.keys():
+            total_usage = 0.0
+            total_capacity = 0.0
+            for scenario in self.scenarios:
+                s = scenario.id
+                flow = scenario_flows[s].get(arc, 0.0)
+                base_capacity = self.config.network.arcs[arc]['capacity']
+                capacity_factor = scenario.arc_capacity_factors[arc]
+                effective_capacity = base_capacity * capacity_factor
+                
+                total_usage += flow * scenario.probability
+                total_capacity += effective_capacity * scenario.probability
+            
+            avg_arc_utilization[arc] = (total_usage / total_capacity * 100) if total_capacity > 0 else 0.0
+        
+        # Q1 FIX: Emergency statistics (only airlift now)
+        scenarios_with_emergency = 0
+        total_emergency_airlift = 0.0
+        emergency_capacity_usage = {}
+        
+        for scenario in self.scenarios:
+            s = scenario.id
+            
+            # Q1 FIX: Count emergency airlift flows
+            scenario_airlift = 0.0
+            for supplier in self.config.network.suppliers:
+                for demand_node in self.config.network.demand_nodes:
+                    airlift_val = pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    if airlift_val > 1e-6:
+                        scenario_airlift += airlift_val
+            
+            # Count scenario as having emergency if airlift is used
+            if scenario_airlift > 1e-6:
+                scenarios_with_emergency += 1
+                total_emergency_airlift += scenario_airlift * scenario.probability
+            
+            # Track emergency capacity usage per supplier per scenario
+            emergency_capacity_usage[s] = {}
+            for supplier in self.config.network.suppliers:
+                # Q1 FIX: Only airlift emergency now
+                supplier_airlift = sum(
+                    pulp.value(self.variables['emergency_airlift'][s][(supplier, demand_node)])
+                    for demand_node in self.config.network.demand_nodes
+                )
+                
+                supplier_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = supplier_capacity * capacity_factor
+                
+                if effective_capacity > 1e-6:
+                    usage_pct = (supplier_airlift / effective_capacity) * 100
+                    emergency_capacity_usage[s][supplier] = usage_pct
+                else:
+                    emergency_capacity_usage[s][supplier] = 0.0
+        
+        # Identify binding constraints (within tolerance)
+        tolerance = 1e-3  # Constraint is "tight" if slack < tolerance
+        
+        # Tight supplier capacity constraints
+        tight_supplier_constraints = []
+        for scenario in self.scenarios:
+            s = scenario.id
+            for supplier in self.config.network.suppliers:
+                # Total outflow from supplier
+                supplier_flow = sum(
+                    scenario_flows[s].get((supplier, target), 0.0)
+                    for target in self.config.network.distribution_centers
+                    if (supplier, target) in self.config.network.arcs
+                )
+                # Add emergency procurement
+                emergency = scenario_emergency_procurement[s].get(supplier, 0.0)
+                total_usage = supplier_flow + emergency
+                
+                # Effective capacity
+                base_capacity = self.config.network.facilities[supplier]['capacity']
+                capacity_factor = scenario.facility_capacity_factors[supplier]
+                effective_capacity = base_capacity * capacity_factor
+                
+                slack = effective_capacity - total_usage
+                if slack < tolerance and effective_capacity > 1e-6:
+                    tight_supplier_constraints.append((supplier, s, slack))
+        
+        # Tight DC storage constraints
+        tight_dc_constraints = []
+        for dc in self.config.network.distribution_centers:
+            inventory = prepositioned_inventory[dc]
+            storage_capacity = self.config.network.facilities[dc]['storage_capacity']
+            slack = storage_capacity - inventory
+            if slack < tolerance:
+                tight_dc_constraints.append((dc, slack))
+        
+        # Tight arc capacity constraints
+        tight_arc_constraints = []
+        for scenario in self.scenarios:
+            s = scenario.id
+            for arc in self.config.network.arcs.keys():
+                flow = scenario_flows[s].get(arc, 0.0)
+                base_capacity = self.config.network.arcs[arc]['capacity']
+                capacity_factor = scenario.arc_capacity_factors[arc]
+                effective_capacity = base_capacity * capacity_factor
+                
+                slack = effective_capacity - flow
+                if slack < tolerance and effective_capacity > 1e-6:
+                    tight_arc_constraints.append((arc, s, slack))
+        
+        return OptimizationResult(
+            status=status_str,
+            objective_value=pulp.value(self.model.objective),
+            solve_time=solve_time,
+            prepositioned_inventory=prepositioned_inventory,
+            scenario_costs=scenario_costs,
+            scenario_flows=scenario_flows,
+            scenario_unmet_demand=scenario_unmet_demand,
+            scenario_emergency_procurement={},  # REMOVED: legacy emergency (now only airlift in flows)
+            scenario_leftover_inventory=scenario_leftover_inventory,  # Q1 fix: include leftover
+            expected_cost=expected_cost,
+            cvar_value=cvar_value,
+            var_value=var_value,
+            tail_scenarios=tail_scenarios,
+            tail_probability=tail_probability,
+            min_satisfaction_ratio=min_satisfaction_ratio,
+            avg_satisfaction_ratio=avg_satisfaction_ratio,
+            avg_supplier_utilization=avg_supplier_utilization,
+            avg_dc_utilization=avg_dc_utilization,
+            avg_arc_utilization=avg_arc_utilization,
+            scenarios_with_emergency=scenarios_with_emergency,
+            total_emergency_procurement=total_emergency_airlift,  # Now tracks airlift only
+            tight_supplier_constraints=tight_supplier_constraints,
+            tight_dc_constraints=tight_dc_constraints,
+            tight_arc_constraints=tight_arc_constraints,
+            emergency_capacity_usage=emergency_capacity_usage
+        )
