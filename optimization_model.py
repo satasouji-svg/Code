@@ -113,7 +113,25 @@ class TwoStageStochasticModel:
         opt = self.config.optimization
         
         # ===== FIRST STAGE VARIABLES =====
+        
+        # Q1 CRITICAL FIX: Prepositioning shipments from suppliers to DCs
+        # This fixes the "free inventory" problem - inventory must be procured
+        self.variables['prep_ship'] = {}
+        for supplier in net.suppliers:
+            for dc in net.distribution_centers:
+                arc = (supplier, dc)
+                # Check if arc exists
+                if arc in net.arcs:
+                    arc_capacity = net.arcs[arc].get('capacity', float('inf'))
+                    self.variables['prep_ship'][arc] = pulp.LpVariable(
+                        f"prep_ship_{supplier}_{dc}",
+                        lowBound=0,
+                        upBound=arc_capacity,
+                        cat='Continuous'
+                    )
+        
         # Prepositioned inventory at each distribution center
+        # Q1 FIX: Now constrained by prepositioning shipments (not free)
         self.variables['inventory'] = {}
         for dc in net.distribution_centers:
             storage_cap = net.facilities[dc].get('storage_capacity', float('inf'))
@@ -203,9 +221,37 @@ class TwoStageStochasticModel:
         """Add first stage constraints for preparedness decisions."""
         net = self.config.network
         
-        # Storage capacity constraints are already enforced by variable bounds
-        # No additional first-stage constraints needed in this formulation
-        pass
+        # Q1 CRITICAL FIX: Inventory sourcing constraint
+        # Inventory must be procured from suppliers (not free/magic)
+        for dc in net.distribution_centers:
+            # Sum of prepositioning shipments to this DC
+            total_prep_ship = pulp.lpSum([
+                self.variables['prep_ship'][(supplier, dc)]
+                for supplier in net.suppliers
+                if (supplier, dc) in self.variables['prep_ship']
+            ])
+            
+            # Inventory cannot exceed what was shipped
+            self.model += (
+                self.variables['inventory'][dc] <= total_prep_ship,
+                f"inventory_sourcing_{dc}"
+            )
+        
+        # Q1 CRITICAL FIX: Supplier capacity for prepositioning
+        # Prepositioning shipments limited by supplier capacity
+        for supplier in net.suppliers:
+            total_prep_from_supplier = pulp.lpSum([
+                self.variables['prep_ship'][(supplier, dc)]
+                for dc in net.distribution_centers
+                if (supplier, dc) in self.variables['prep_ship']
+            ])
+            
+            # Cannot exceed supplier's base capacity
+            supplier_capacity = net.facilities[supplier].get('capacity', float('inf'))
+            self.model += (
+                total_prep_from_supplier <= supplier_capacity,
+                f"prep_supplier_capacity_{supplier}"
+            )
     
     def _add_second_stage_constraints(self):
         """Add second stage constraints for recourse decisions."""
@@ -470,11 +516,28 @@ class TwoStageStochasticModel:
         opt = self.config.optimization
         
         # ===== FIRST STAGE COSTS =====
+        # Q1 CRITICAL FIX: Realistic prepositioning costs
+        # Previously: Only holding cost (~$0.50) - inventory was "free"
+        # Now: procurement + transport + holding
+        
+        # Prepositioning procurement and transport costs
+        prepositioning_cost = pulp.lpSum([
+            self.variables['prep_ship'][(supplier, dc)] * (
+                net.facilities[supplier].get('preposition_cost', 2.0) +  # Procurement cost
+                net.arcs[(supplier, dc)]['cost']  # Transport cost (use 'cost', not 'transport_cost')
+            )
+            for supplier in net.suppliers
+            for dc in net.distribution_centers
+            if (supplier, dc) in self.variables['prep_ship']
+        ])
+        
         # Inventory holding costs
-        first_stage_cost = pulp.lpSum([
+        holding_cost = pulp.lpSum([
             self.variables['inventory'][dc] * net.facilities[dc]['holding_cost']
             for dc in net.distribution_centers
         ])
+        
+        first_stage_cost = prepositioning_cost + holding_cost
         
         # ===== SECOND STAGE COSTS =====
         # Expected cost E[Q]
