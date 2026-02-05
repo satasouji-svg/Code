@@ -2,6 +2,18 @@
 
 Quick reference to find the right troubleshooting guide for your issue.
 
+## Common Questions
+
+### How Many Scenarios Are There?
+
+**Answer**: Default is **20 scenarios**
+
+**Detailed FAQ**: [SCENARIOS_FAQ.md](SCENARIOS_FAQ.md)
+
+**Quick Check**: Run `python info.py` to see current configuration
+
+**Configuration**: Edit `config.py` line 113 to change scenario count
+
 ## I'm Getting a NameError
 
 ### `NameError: name 'scenario_emergency_procurement' is not defined`
@@ -51,6 +63,7 @@ Covers:
 
 | Document | Purpose | Best For |
 |----------|---------|----------|
+| **SCENARIOS_FAQ.md** | **Scenario information** | **Understanding scenarios** |
 | QUICKFIX_NAMEERROR.txt | Immediate one-line fix | Quick reference |
 | FIX_YOUR_LOCAL_CODE.md | Step-by-step local fix | Following exact steps |
 | BUGFIX_EMERGENCY_PROCUREMENT.md | Complete fix with examples | Understanding the issue |
@@ -58,19 +71,24 @@ Covers:
 | README.md | Full project documentation | Complete reference |
 | QUICKSTART.md | Getting started guide | New users |
 | DOWNLOAD.md | Download instructions | Installation |
+| **info.py** | **View current config** | **Quick system check** |
 
 ## Quick Decision Tree
 
 ```
-Do you have a NameError?
-├─ YES: Is it about 'scenario_emergency_procurement'?
-│   ├─ YES: Go to QUICKFIX_NAMEERROR.txt or FIX_YOUR_LOCAL_CODE.md
-│   └─ NO: Go to MIGRATION_GUIDE.md (Generic patterns)
-└─ NO: What's your issue?
-    ├─ Download: Go to DOWNLOAD.md
-    ├─ Getting started: Go to QUICKSTART.md
-    ├─ General issues: Go to README.md (Troubleshooting section)
-    └─ Migration: Go to MIGRATION_GUIDE.md
+What do you need?
+├─ Configuration/scenario info?
+│   ├─ Quick check: Run `python info.py`
+│   └─ Detailed info: Read SCENARIOS_FAQ.md
+├─ Do you have a NameError?
+│   ├─ YES: Is it about 'scenario_emergency_procurement'?
+│   │   ├─ YES: Go to QUICKFIX_NAMEERROR.txt or FIX_YOUR_LOCAL_CODE.md
+│   │   └─ NO: Go to MIGRATION_GUIDE.md (Generic patterns)
+│   └─ NO: What's your issue?
+│       ├─ Download: Go to DOWNLOAD.md
+│       ├─ Getting started: Go to QUICKSTART.md
+│       ├─ General issues: Go to README.md (Troubleshooting section)
+│       └─ Migration: Go to MIGRATION_GUIDE.md
 ```
 
 ## Error Code Quick Reference

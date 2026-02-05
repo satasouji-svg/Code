@@ -24,6 +24,20 @@ Visit the [Releases](https://github.com/satasouji-svg/Code/releases) page to dow
 
 ---
 
+## 📊 Quick Facts
+
+| Feature | Default Value | Configurable? |
+|---------|---------------|---------------|
+| **Number of Scenarios** | **20** | ✅ Yes |
+| Network Nodes | 3 suppliers, 3 DCs, 4 zones | ✅ Yes |
+| Solver | HiGHS (open-source) | ✅ Yes |
+| Solve Time (20 scenarios) | ~0.06 seconds | - |
+| Risk Model | CVaR (α=0.95) | ✅ Yes |
+
+**Want to know more about scenarios?** See [SCENARIOS_FAQ.md](SCENARIOS_FAQ.md)
+
+---
+
 ## Overview
 
 This project implements a sophisticated optimization framework for designing resilient supply networks that can withstand wildfire-related disruptions. The model uses:
@@ -112,6 +126,21 @@ pytest test_optimization.py -v
 All 24 tests should pass successfully.
 
 ## Usage
+
+### View Configuration
+
+Check current configuration and scenario settings:
+
+```bash
+python info.py
+```
+
+This displays:
+- Number of scenarios (default: 20)
+- Network structure (suppliers, DCs, zones)
+- Risk parameters (λ, α, β)
+- Budget constraints
+- Uncertainty parameters
 
 ### Quick Demo
 
@@ -347,6 +376,13 @@ Performance depends on:
 - Hardware specifications
 
 ## Troubleshooting
+
+### Common Questions
+
+**How many scenarios does the system use?**
+- Default: **20 scenarios**
+- See [SCENARIOS_FAQ.md](SCENARIOS_FAQ.md) for detailed information
+- Configurable in `config.py` (line 113)
 
 ### Solver Not Found
 If you get "Solver not available" errors:
