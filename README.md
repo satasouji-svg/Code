@@ -368,6 +368,19 @@ To improve performance:
 - Adjust MIP gap tolerance
 - Use smaller network instances
 
+### NameError or Undefined Variables
+If you encounter errors like `NameError: name 'scenario_emergency_procurement' is not defined`:
+- See [BUGFIX_EMERGENCY_PROCUREMENT.md](BUGFIX_EMERGENCY_PROCUREMENT.md) for specific fix
+- Read [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for migration help
+- Ensure you're using the latest version of the code
+- Check that all variables are initialized before use
+
+### Code from Different Versions
+If you're using a customized or older version:
+- Review [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for migration steps
+- Consider using the tested repository version
+- Check [BUGFIX_EMERGENCY_PROCUREMENT.md](BUGFIX_EMERGENCY_PROCUREMENT.md) for common fixes
+
 ## Contributing
 
 This is a research project. Contributions welcome:
