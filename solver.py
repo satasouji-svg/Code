@@ -37,29 +37,37 @@ class OptimizationSolver:
         Returns:
             Dictionary with solution information
         """
-        # Try appsi_highs first (faster interface), fallback to highs
-        try:
-            self.solver = SolverFactory(self.solver_name)
-        except Exception:
-            print(f"Solver {self.solver_name} not available, trying 'highs'...")
-            self.solver_name = 'highs'
-            self.solver = SolverFactory('highs')
-        
-        # Set solver options
-        for key, value in self.solver_options.items():
-            self.solver.options[key] = value
-        
-        # Solve the model
+        # Try to use appsi HiGHS solver directly (more reliable)
         start_time = time.time()
         try:
-            self.results = self.solver.solve(model, tee=tee)
+            from pyomo.contrib.appsi.solvers.highs import Highs
+            self.solver = Highs()
+            if not self.solver.available():
+                raise Exception("HiGHS solver not available")
+            
+            # Set solver options
+            for key, value in self.solver_options.items():
+                self.solver.config[key] = value
+            
+            # Solve the model
+            self.results = self.solver.solve(model)
             self.solve_time = time.time() - start_time
+            
         except Exception as e:
-            return {
-                'status': 'error',
-                'message': str(e),
-                'solve_time': time.time() - start_time
-            }
+            # Fallback: Try SolverFactory approach
+            try:
+                self.solver = SolverFactory(self.solver_name)
+                # Set solver options
+                for key, value in self.solver_options.items():
+                    self.solver.options[key] = value
+                self.results = self.solver.solve(model, tee=tee)
+                self.solve_time = time.time() - start_time
+            except Exception as e2:
+                return {
+                    'status': 'error',
+                    'message': f"Solver not available: {str(e)}, {str(e2)}",
+                    'solve_time': time.time() - start_time
+                }
         
         # Extract solution information
         solution_info = self._extract_solution_info(model)
@@ -70,31 +78,56 @@ class OptimizationSolver:
         """Extract solution information from solved model."""
         solution = {
             'solve_time': self.solve_time,
-            'solver': self.solver_name
+            'solver': str(type(self.solver).__name__) if self.solver else 'unknown'
         }
         
-        # Check solver status
-        if (self.results.solver.status == SolverStatus.ok and
-            self.results.solver.termination_condition == TerminationCondition.optimal):
-            solution['status'] = 'optimal'
-            solution['objective_value'] = pyo.value(model.objective)
-            
-            # Extract first-stage decisions
-            solution['first_stage'] = self._extract_first_stage(model)
-            
-            # Extract second-stage summary statistics
-            solution['second_stage_summary'] = self._extract_second_stage_summary(model)
-            
-            # Extract CVaR information
-            solution['risk_metrics'] = self._extract_risk_metrics(model)
-            
-        elif self.results.solver.termination_condition == TerminationCondition.infeasible:
-            solution['status'] = 'infeasible'
-            solution['message'] = 'Model is infeasible'
-        else:
-            solution['status'] = 'unknown'
-            solution['message'] = f'Solver status: {self.results.solver.status}, ' \
-                                f'Termination: {self.results.solver.termination_condition}'
+        # Check solver status - handle both appsi and standard Pyomo results
+        try:
+            # Try appsi result format first
+            if hasattr(self.results, 'termination_condition'):
+                from pyomo.contrib.appsi.base import TerminationCondition as AppsiTerminationCondition
+                if self.results.termination_condition == AppsiTerminationCondition.optimal:
+                    solution['status'] = 'optimal'
+                    solution['objective_value'] = pyo.value(model.objective)
+                    
+                    # Extract first-stage decisions
+                    solution['first_stage'] = self._extract_first_stage(model)
+                    
+                    # Extract second-stage summary statistics
+                    solution['second_stage_summary'] = self._extract_second_stage_summary(model)
+                    
+                    # Extract CVaR information
+                    solution['risk_metrics'] = self._extract_risk_metrics(model)
+                else:
+                    solution['status'] = str(self.results.termination_condition)
+                    solution['message'] = f'Solver terminated with: {self.results.termination_condition}'
+            # Fall back to standard Pyomo result format
+            elif (self.results.solver.status == SolverStatus.ok and
+                  self.results.solver.termination_condition == TerminationCondition.optimal):
+                solution['status'] = 'optimal'
+                solution['objective_value'] = pyo.value(model.objective)
+                
+                # Extract first-stage decisions
+                solution['first_stage'] = self._extract_first_stage(model)
+                
+                # Extract second-stage summary statistics
+                solution['second_stage_summary'] = self._extract_second_stage_summary(model)
+                
+                # Extract CVaR information
+                solution['risk_metrics'] = self._extract_risk_metrics(model)
+            elif hasattr(self.results, 'solver') and self.results.solver.termination_condition == TerminationCondition.infeasible:
+                solution['status'] = 'infeasible'
+                solution['message'] = 'Model is infeasible'
+            else:
+                solution['status'] = 'unknown'
+                if hasattr(self.results, 'solver'):
+                    solution['message'] = f'Solver status: {self.results.solver.status}, ' \
+                                        f'Termination: {self.results.solver.termination_condition}'
+                else:
+                    solution['message'] = f'Termination: {self.results.termination_condition}'
+        except Exception as e:
+            solution['status'] = 'error'
+            solution['message'] = f'Error extracting solution: {str(e)}'
         
         return solution
     
