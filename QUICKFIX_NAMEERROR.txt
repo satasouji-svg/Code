@@ -1,0 +1,80 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║           QUICK FIX: NameError scenario_emergency_procurement             ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+ERROR MESSAGE:
+--------------
+NameError: name 'scenario_emergency_procurement' is not defined
+File "optimization_model.py", line 878, in _extract_results
+
+IMMEDIATE FIX:
+--------------
+Add this code BEFORE line 878 (where the error occurs):
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ # Initialize emergency procurement data                                   │
+│ scenario_emergency_procurement = {}                                       │
+│ for s in self.model.SCENARIOS:                                           │
+│     scenario_emergency_procurement[s] = {}                                │
+│     for supplier in self.model.SUPPLIERS:                                 │
+│         total = 0                                                         │
+│         if hasattr(self.model, 'flow_emergency'):                        │
+│             for arc in self.model.EMERGENCY_ARCS:                        │
+│                 if arc[0] == supplier:                                    │
+│                     total += pyo.value(self.model.flow_emergency[s, arc])│
+│         scenario_emergency_procurement[s][supplier] = total               │
+└───────────────────────────────────────────────────────────────────────────┘
+
+ALTERNATIVE - INLINE FIX:
+--------------------------
+Replace line 878:
+  emergency = scenario_emergency_procurement[s].get(supplier, 0.0)
+
+With:
+  emergency = sum(pyo.value(self.model.flow_emergency[s, arc])
+                  for arc in self.model.EMERGENCY_ARCS
+                  if arc[0] == supplier)
+
+WHY THIS HAPPENS:
+-----------------
+The variable is used before being initialized. Python needs:
+  1. Define/initialize variable
+  2. THEN use it
+
+Not:
+  1. Use it (❌ NameError!)
+
+VERIFY THE FIX:
+---------------
+python main.py
+
+✅ Should run without NameError
+✅ Model should solve successfully
+✅ Results should be extracted
+
+DETAILED HELP:
+--------------
+📖 BUGFIX_EMERGENCY_PROCUREMENT.md - Complete fix guide
+📖 MIGRATION_GUIDE.md - Prevent future issues
+📖 README.md - Updated troubleshooting section
+
+BEST PRACTICE:
+--------------
+Always initialize dictionaries before using them:
+
+  ❌ BAD:
+     value = my_dict[key]  # NameError if my_dict not defined
+
+  ✅ GOOD:
+     my_dict = {}
+     my_dict[key] = calculate_value()
+     value = my_dict[key]  # Works!
+
+NEED MORE HELP?
+---------------
+1. Read BUGFIX_EMERGENCY_PROCUREMENT.md for detailed solutions
+2. Check MIGRATION_GUIDE.md for migration steps
+3. Consider using the tested repository version
+4. Open an issue with your specific error details
+
+═══════════════════════════════════════════════════════════════════════════

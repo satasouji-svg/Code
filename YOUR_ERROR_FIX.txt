@@ -1,0 +1,145 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║           YOUR EXACT ERROR - IMMEDIATE FIX                                ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+YOUR ERROR:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: C:\Users\WINDOWS 10\.spyder-py3\Wildfir 13\
+      Code-copilot-rewrite-supply-network-model\optimization_model.py
+Line: 878, in _extract_results
+Error: NameError: name 'scenario_emergency_procurement' is not defined
+
+Code: emergency = scenario_emergency_procurement[s].get(supplier, 0.0)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                  NOT DEFINED!
+
+IMMEDIATE FIX:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📍 STEP 1: Open your file
+   C:\Users\WINDOWS 10\.spyder-py3\Wildfir 13\
+   Code-copilot-rewrite-supply-network-model\optimization_model.py
+
+📍 STEP 2: Find line 878
+   The line that says:
+   emergency = scenario_emergency_procurement[s].get(supplier, 0.0)
+
+📍 STEP 3: Add this code BEFORE line 878
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ import pyomo.environ as pyo  # Add at top if not present                 │
+│                                                                           │
+│ # Initialize scenario_emergency_procurement (add before line 878)        │
+│ scenario_emergency_procurement = {}                                       │
+│                                                                           │
+│ for s in self.model.SCENARIOS:                                           │
+│     scenario_emergency_procurement[s] = {}                                │
+│                                                                           │
+│     for supplier in self.model.SUPPLIERS:                                 │
+│         emergency_total = 0.0                                             │
+│                                                                           │
+│         # Check if emergency flows exist                                  │
+│         if hasattr(self.model, 'flow_emergency'):                        │
+│             if hasattr(self.model, 'EMERGENCY_ARCS'):                    │
+│                 # Sum all emergency flows from this supplier              │
+│                 for arc in self.model.EMERGENCY_ARCS:                    │
+│                     if arc[0] == supplier:                                │
+│                         try:                                              │
+│                             flow_val = pyo.value(                         │
+│                                 self.model.flow_emergency[s, arc]        │
+│                             )                                             │
+│                             if flow_val is not None:                      │
+│                                 emergency_total += flow_val               │
+│                         except:                                           │
+│                             pass                                          │
+│                                                                           │
+│         # Store the total                                                 │
+│         scenario_emergency_procurement[s][supplier] = emergency_total     │
+└───────────────────────────────────────────────────────────────────────────┘
+
+📍 STEP 4: Save the file (Ctrl+S)
+
+📍 STEP 5: Run your code again
+   runfile('C:/Users/WINDOWS 10/.spyder-py3/Wildfir 13/
+           Code-copilot-rewrite-supply-network-model/main.py', ...)
+
+📍 STEP 6: Verify success
+   ✅ Should run without NameError
+   ✅ Model should solve successfully
+   ✅ Results should be extracted
+
+ALTERNATIVE FIX (Even Simpler):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you don't need the variable, REPLACE line 878 with:
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ # Calculate inline instead (replace line 878)                            │
+│ emergency = sum(                                                          │
+│     pyo.value(self.model.flow_emergency[s, arc])                         │
+│     for arc in self.model.EMERGENCY_ARCS                                 │
+│     if arc[0] == supplier                                                 │
+│ ) if hasattr(self.model, 'flow_emergency') else 0.0                      │
+└───────────────────────────────────────────────────────────────────────────┘
+
+WHY THIS WORKS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Python requires variables to be DEFINED before use:
+
+❌ WRONG ORDER:
+   1. Use variable        → emergency = scenario_emergency...[s]
+   2. Define variable     → scenario_emergency... = {}
+   Result: NameError!
+
+✅ CORRECT ORDER:
+   1. Define variable     → scenario_emergency... = {}
+   2. Populate variable   → scenario_emergency...[s][supplier] = value
+   3. Use variable        → emergency = scenario_emergency...[s]
+   Result: Works!
+
+DETAILED HELP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Need more help? See these files in the repository:
+
+📖 WORKING_REFERENCE_IMPLEMENTATION.md
+   → Complete working code you can copy (3 versions)
+
+📖 FIX_YOUR_LOCAL_CODE.md
+   → Step-by-step instructions specific to your file
+
+📖 QUICKFIX_NAMEERROR.txt
+   → Quick reference card
+
+📖 BUGFIX_EMERGENCY_PROCUREMENT.md
+   → Complete explanation with 3 fix options
+
+📖 TROUBLESHOOTING_INDEX.md
+   → Find the right guide for your issue
+
+STILL STUCK?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Check indentation (Python is indent-sensitive - use 4 spaces)
+2. Make sure you added the code BEFORE line 878, not after
+3. Verify imports: import pyomo.environ as pyo at the top
+4. Check spelling: scenario_emergency_procurement (not procurment)
+
+QUICK TEST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After the fix, run and you should see:
+
+  ✅ Model built successfully
+  ✅ Solving optimization model...
+  ✅ Optimal - objective value 12602.315
+  ✅ Results extracted successfully
+  ✅ NO NameError!
+
+═══════════════════════════════════════════════════════════════════════════
+
+Copy the code in the box above and paste it into your file before line 878.
+Save, run, and the error will be gone!
+
+═══════════════════════════════════════════════════════════════════════════
