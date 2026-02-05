@@ -295,21 +295,20 @@ class WildfireSupplyNetworkModel:
         )
         
         # Arc capacity constraints with hardening effects
-        def arc_capacity_rule(m, s, arc):
+        def arc_capacity_rule(m, s, i, j):
             # Effective capacity factor: if hardened, disruption impact is reduced
-            if arc in m.SUPPLIER_DC_ARCS:
-                base_factor = m.arc_capacity_factor[s, arc]
-                # Hardening improves resilience
-                effective_factor = base_factor + m.harden[arc] * (1.0 - base_factor) * 0.7
-                # Large M for capacity limit (no explicit capacity on arcs)
-                return m.flow_supplier_dc[s, arc] <= 1000 * effective_factor
-            else:
-                return pyo.Constraint.Skip
+            arc = (i, j)
+            base_factor = m.arc_capacity_factor[s, arc]
+            # Hardening improves resilience
+            effective_factor = base_factor + m.harden[arc] * (1.0 - base_factor) * 0.7
+            # Large M for capacity limit (no explicit capacity on arcs)
+            return m.flow_supplier_dc[s, arc] <= 1000 * effective_factor
         model.supplier_dc_arc_capacity = pyo.Constraint(
             model.SCENARIOS, model.SUPPLIER_DC_ARCS, rule=arc_capacity_rule
         )
         
-        def dc_zone_arc_capacity_rule(m, s, arc):
+        def dc_zone_arc_capacity_rule(m, s, i, j):
+            arc = (i, j)
             base_factor = m.arc_capacity_factor[s, arc]
             effective_factor = base_factor + m.harden[arc] * (1.0 - base_factor) * 0.7
             return m.flow_dc_zone[s, arc] <= 1000 * effective_factor
