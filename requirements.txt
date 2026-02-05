@@ -1,0 +1,16 @@
+# Core optimization dependencies
+pyomo>=6.7.0
+highspy>=1.5.0
+
+# Data handling and numerical computing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Configuration and utilities
+pyyaml>=6.0
+pytest>=7.4.0
