@@ -271,8 +271,8 @@ class TestEdgeCases:
         network_config, model_params, scenario_params = get_default_config()
         
         # Create scenarios with very high demand
-        gen = ScenarioGenerator(network_config, scenario_params)
         scenario_params.demand_surge_max = 3.0  # 3x base demand
+        gen = ScenarioGenerator(network_config, scenario_params)
         scenarios = gen.generate_scenarios(3)
         
         model = WildfireSupplyNetworkModel(network_config, model_params, scenarios)

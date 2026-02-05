@@ -25,6 +25,9 @@ class WildfireSupplyNetworkModel:
         """Build the complete two-stage stochastic programming model."""
         model = pyo.ConcreteModel(name="WildfireResilientSupplyNetwork")
         
+        # Store model parameters for later access
+        model._alpha_cvar = self.params.alpha_cvar
+        
         # Sets
         self._define_sets(model)
         

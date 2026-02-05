@@ -267,7 +267,8 @@ class ModelValidator:
         results = {
             'valid': True,
             'checks': [],
-            'errors': []
+            'errors': [],
+            'warnings': []
         }
         
         if not hasattr(model, 'var') or not hasattr(model, 'cvar_excess'):

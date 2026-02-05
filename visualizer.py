@@ -64,7 +64,7 @@ class ResultVisualizer:
         
         # Sorted cost plot
         sorted_costs = sorted(costs)
-        ax2.plot(scenarios, sorted_costs, marker='o', linewidth=2, markersize=6)
+        ax2.plot(range(len(sorted_costs)), sorted_costs, marker='o', linewidth=2, markersize=6)
         ax2.axhline(np.mean(costs), color='green', linestyle='--', 
                    linewidth=2, alpha=0.7)
         ax2.fill_between(range(len(scenarios)), 

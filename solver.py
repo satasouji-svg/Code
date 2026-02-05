@@ -180,7 +180,9 @@ class OptimizationSolver:
         
         # Calculate CVaR if applicable
         if hasattr(model, 'var') and hasattr(model, 'cvar_excess'):
-            alpha = 0.95  # Default, should match model params
+            # Try to extract alpha from model parameters (stored in model object)
+            # Default to 0.95 if not available
+            alpha = getattr(model, '_alpha_cvar', 0.95)
             cvar_component = sum(pyo.value(model.scenario_prob[s] * model.cvar_excess[s])
                                for s in model.SCENARIOS)
             metrics['cvar'] = pyo.value(model.var) + cvar_component / (1 - alpha)
