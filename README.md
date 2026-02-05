@@ -2,6 +2,28 @@
 
 A comprehensive Python project for optimizing supply network resilience against wildfire disruptions using two-stage stochastic programming with CVaR-based risk management and equity constraints.
 
+## 📥 Download
+
+You can download this project in several ways:
+
+### Option 1: Download ZIP File (Recommended for Quick Start)
+1. Visit the GitHub repository: https://github.com/satasouji-svg/Code
+2. Click the green **"Code"** button (near the top right)
+3. Select **"Download ZIP"** from the dropdown menu
+4. Extract the ZIP file to your desired location
+5. Follow the [Installation](#installation) instructions below
+
+### Option 2: Clone with Git
+```bash
+git clone https://github.com/satasouji-svg/Code.git
+cd Code
+```
+
+### Option 3: Download Specific Release
+Visit the [Releases](https://github.com/satasouji-svg/Code/releases) page to download a specific version.
+
+---
+
 ## Overview
 
 This project implements a sophisticated optimization framework for designing resilient supply networks that can withstand wildfire-related disruptions. The model uses:
@@ -70,9 +92,10 @@ This project implements a sophisticated optimization framework for designing res
 
 ### Setup
 
-1. Clone the repository:
+**After downloading** (see [Download](#-download) section above):
+
+1. Navigate to the extracted/cloned directory:
 ```bash
-git clone https://github.com/satasouji-svg/Code.git
 cd Code
 ```
 
@@ -80,6 +103,13 @@ cd Code
 ```bash
 pip install -r requirements.txt
 ```
+
+3. Verify installation by running tests:
+```bash
+pytest test_optimization.py -v
+```
+
+All 24 tests should pass successfully.
 
 ## Usage
 

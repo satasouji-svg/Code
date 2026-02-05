@@ -2,14 +2,25 @@
 
 This guide will help you get started with the Wildfire-Resilient Supply Network Optimization project in 5 minutes.
 
+## Step 0: Download the Project (30 seconds)
+
+### Option A: Download ZIP (Easiest)
+1. Go to https://github.com/satasouji-svg/Code
+2. Click the green **"Code"** button
+3. Select **"Download ZIP"**
+4. Extract the ZIP file to your preferred location
+5. Open a terminal/command prompt in the extracted folder
+
+### Option B: Clone with Git
+```bash
+git clone https://github.com/satasouji-svg/Code.git
+cd Code
+```
+
 ## Step 1: Installation (1 minute)
 
 ```bash
-# Clone the repository
-git clone https://github.com/satasouji-svg/Code.git
-cd Code
-
-# Install dependencies
+# Install dependencies (you should already be in the Code directory)
 pip install -r requirements.txt
 ```
 
