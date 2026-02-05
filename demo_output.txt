@@ -1,0 +1,86 @@
+
+======================================================================
+ WILDFIRE-RESILIENT SUPPLY NETWORK OPTIMIZATION - QUICK DEMO
+======================================================================
+
+Generating scenarios...
+
+Generated 20 scenarios
+Total demand range: 170.0 - 236.3
+Disruption range: 0 - 3 arcs
+
+Validating scenarios...
+✓ Scenario probabilities validated
+
+Building optimization model...
+
+Validating model structure...
+✓ Model structure validated
+
+Solving optimization model...
+✓ Optimization completed in 0.06 seconds
+
+Validating solution feasibility...
+
+============================================================
+VALIDATION REPORT
+============================================================
+
+Overall Status: VALID
+
+Passed Checks:
+  ✓ Flow conservation satisfied at all DCs
+  ✓ Demand constraints satisfied
+  ✓ Capacity constraints satisfied
+  ✓ Non-negativity constraints satisfied
+  ✓ Hardening budget satisfied: $0.00 <= $15000.00
+============================================================
+
+
+Generating reports and visualizations...
+
+============================================================
+OPTIMIZATION RESULTS SUMMARY
+============================================================
+Status: optimal
+Solve Time: 0.06 seconds
+Objective Value: $1,418.87
+
+Risk Metrics:
+  VaR: $976.37
+  CVaR: $976.37
+  Expected Cost: $835.78
+
+First-Stage Decisions:
+  Arcs Hardened: 0
+  Total Prepositioning: 236.30 units
+
+Service Levels:
+  Z1: 100.0%
+  Z2: 100.0%
+  Z3: 100.0%
+  Z4: 100.0%
+============================================================
+
+Summary report saved to results/quick_demo_summary.csv
+Cost breakdown saved to results/quick_demo_cost_breakdown.csv
+Service level table saved to results/quick_demo_service_levels.csv
+Scenario cost table saved to results/quick_demo_scenario_costs.csv
+First-stage decisions saved to results/quick_demo_first_stage_decisions.csv
+Solution JSON saved to results/quick_demo_solution.json
+Cost distribution plot saved to results/figures/quick_demo_cost_distribution.png
+First-stage decisions plot saved to results/figures/quick_demo_first_stage_decisions.png
+Service level heatmap saved to results/figures/quick_demo_service_heatmap.png
+Fairness analysis saved to results/figures/quick_demo_fairness_analysis.png
+
+======================================================================
+ DEMO COMPLETED SUCCESSFULLY
+======================================================================
+
+Results saved to 'results/' directory
+Figures saved to 'results/figures/' directory
+
+======================================================================
+ ALL OPERATIONS COMPLETED
+======================================================================
+
